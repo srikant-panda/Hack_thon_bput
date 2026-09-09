@@ -51,15 +51,17 @@ Incoming Ingestion Payload (Email / URL / Message / ATO / Network / Media)
 
 ---
 
-## 🔄 Distributed OpenRouter Key Rotator & Circuit Breaker
+## 🔄 Multi-Provider Distributed LLM Engine & Key Rotation
 
-CYBERGUARD incorporates a production-grade LLM key management engine in [`backend/app/ai/key_rotator.py`](app/ai/key_rotator.py):
+CYBERGUARD incorporates a production-grade multi-provider LLM orchestration engine in [`backend/app/ai/llm_client.py`](app/ai/llm_client.py) and [`backend/app/ai/key_rotator.py`](app/ai/key_rotator.py):
 
-1. **Distributed Load Balancing**: Instead of exhausting a single key until rate-limited, requests cycle evenly across all healthy keys via round-robin distribution.
-2. **Configurable Key Pool**: Supports up to a configurable maximum of keys (default: 10 via `OPENROUTER_MAX_KEYS`). Keys can be supplied via comma-separated list (`OPENROUTER_API_KEYS=k1,k2,k3`) or individual numbered variables (`OPENROUTER_API_KEY_1`, `OPENROUTER_API_KEY_2`, etc.).
-3. **Active Circuit Breaking**: When a key receives an HTTP `429`, `401`, `402`, or connection timeout, it is immediately flagged as `DOWN` with a cooldown timestamp and removed from active rotation.
-4. **Free-Time Health Check & Re-release**: A background asyncio task periodically probes downed keys against the OpenRouter key status endpoint (`GET https://openrouter.ai/api/v1/auth/key`). Once a key recovers or its cooldown expires, it is automatically re-instated into the active pool.
-5. **Zero-Downtime Heuristic Fallback**: If all configured external keys are temporarily unavailable, the system transparently synthesizes deterministic, context-rich heuristic explanations without dropping requests.
+1. **Multi-Provider Support**: Supports **Groq** (ultra-fast Llama 3.3 70B & 8B), **Google Gemini** (Gemini 2.0 Flash & 1.5 Flash), and **OpenRouter** (OpenAI and Anthropic are excluded by design).
+2. **Distributed Load Balancing**: Instead of hammering a single provider or key, requests cycle evenly across all healthy configured providers using round-robin distribution.
+3. **Key Pool per Provider**: Every provider supports up to a configurable maximum of keys (default: 10 via `GROQ_MAX_KEYS`, `GEMINI_MAX_KEYS`, `OPENROUTER_MAX_KEYS`). Keys can be provided as comma-separated lists (`GROQ_API_KEYS=k1,k2`) or numbered environment variables (`GROQ_API_KEY_1`, etc.).
+4. **Automatic Provider Failover**: If a provider or its keys encounter rate limits (`429`), auth errors (`401/402/403`), or network downtime, the system automatically marks the key down with a cooldown and immediately jumps to the next healthy provider without failing the user's request.
+5. **Free-Time Health Probes & Re-release**: A background asyncio monitor periodically probes downed keys across all providers in the background. Once a key recovers or its cooldown expires, it is automatically re-instated into the active pool.
+6. **Resilient Startup & Clean Logging**: The backend never crashes or refuses to start if keys are missing. During startup, the engine cleanly logs which providers are configured vs. not defined.
+7. **Zero-Downtime Deterministic Heuristic Fallback**: If no keys are defined across any provider, or if all external providers temporarily experience outages, the system seamlessly generates high-quality deterministic forensic heuristic explanations and MITRE ATT&CK technique mappings.
 
 ---
 

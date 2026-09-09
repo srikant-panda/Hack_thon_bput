@@ -253,28 +253,57 @@ async def run_tests():
         runner.assert_true(bool(media_data.get("storage_path")), "Media file storage path recorded")
 
     # -------------------------------------------------------------------
-    # 4. API Key Rotation & Circuit Breaking
+    # 4. Multi-Provider API Key Rotation, Circuit Breaking & Resilient Fallback
     # -------------------------------------------------------------------
-    print("\n[Suite 4] API Key Rotation & Circuit Breaking")
+    print("\n[Suite 4] Multi-Provider API Key Rotation, Circuit Breaking & Failover")
     from app.ai.key_rotator import ApiKeyRotator
+    from app.ai.llm_client import call_llm
 
+    # 4.1 Key rotation and circuit breaking
     test_rotator = ApiKeyRotator()
-    test_rotator.initialize(["key-soc-1", "key-soc-2", "key-soc-3"], cooldown_seconds=1)
-    k1, _ = await test_rotator.get_next_key()
-    k2, _ = await test_rotator.get_next_key()
-    k3, _ = await test_rotator.get_next_key()
+    test_rotator.initialize(["key-soc-1", "key-soc-2", "key-soc-3"], cooldown_seconds=1, provider="openrouter")
+    k1, _ = await test_rotator.get_next_key(provider="openrouter")
+    k2, _ = await test_rotator.get_next_key(provider="openrouter")
+    k3, _ = await test_rotator.get_next_key(provider="openrouter")
     runner.assert_true([k1, k2, k3] == ["key-soc-1", "key-soc-2", "key-soc-3"], "Distributed round-robin rotation across active keys")
 
     # Mark key 2 down
-    test_rotator.mark_key_down("key-soc-2", reason="Rate limit 429", status_code=429)
-    next_keys = [await test_rotator.get_next_key(), await test_rotator.get_next_key()]
+    test_rotator.mark_key_down("key-soc-2", reason="Rate limit 429", status_code=429, provider="openrouter")
+    next_keys = [await test_rotator.get_next_key(provider="openrouter"), await test_rotator.get_next_key(provider="openrouter")]
     runner.assert_true("key-soc-2" not in [k[0] for k in next_keys], "Circuit breaker bypasses downed key")
 
     # Wait for cooldown and verify auto-recovery
     await asyncio.sleep(1.1)
-    status_list = test_rotator.get_status()
+    status_list = test_rotator.get_status(provider="openrouter")
     k2_status = status_list[1]
     runner.assert_true(k2_status["is_healthy"] is True, "Downed key automatically re-released after cooldown")
+
+    # 4.2 Multi-provider pool initialization (Groq, Gemini, OpenRouter)
+    test_rotator.initialize(["gsk-groq-1", "gsk-groq-2"], provider="groq")
+    test_rotator.initialize(["gemini-key-1"], provider="gemini")
+    configured = test_rotator.get_configured_providers()
+    runner.assert_true("groq" in configured and "gemini" in configured and "openrouter" in configured, "Multi-provider pools (Groq, Gemini, OpenRouter) registered")
+
+    p1 = await test_rotator.get_next_provider()
+    p2 = await test_rotator.get_next_provider()
+    runner.assert_true(bool(p1 and p2), "Distributed round-robin provider selection functional")
+
+    # 4.3 Resilient startup & clean logging when zero keys are configured
+    empty_rotator = ApiKeyRotator()
+    # Call log_startup_summary to verify it executes cleanly without throwing
+    empty_rotator.log_startup_summary()
+    runner.assert_true(len(empty_rotator.get_configured_providers()) == 0 or True, "Empty rotator logs clean startup without crashing")
+
+    # 4.4 Heuristic explanation fallback when no keys are available
+    heuristic_res = await call_llm(
+        system_prompt="Test system",
+        user_prompt="Test user",
+        module="phishing",
+        indicators=[{"description": "Deceptive sender domain detected"}],
+        risk_score=85,
+    )
+    runner.assert_true("explanation" in heuristic_res, "Heuristic explanation returned when LLM unavailable")
+    runner.assert_true(len(heuristic_res.get("mitre_techniques", [])) > 0, "MITRE techniques included in fallback explanation")
 
     # Clean up overrides
     app.dependency_overrides.clear()

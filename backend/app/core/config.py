@@ -23,6 +23,12 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./cyberguard.db"
 
+    # Multi-Provider Orchestration (Groq, Gemini, OpenRouter)
+    LLM_PROVIDERS: str = "groq,gemini,openrouter"
+    LLM_COOLDOWN_SECONDS: int = 60
+    LLM_HEALTH_CHECK_INTERVAL_SECONDS: int = 30
+
+    # OpenRouter
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_API_KEYS: str = ""
     OPENROUTER_MAX_KEYS: int = 10
@@ -30,6 +36,24 @@ class Settings(BaseSettings):
     OPENROUTER_HEALTH_CHECK_INTERVAL_SECONDS: int = 30
     OPENROUTER_MODEL: str = "liquid/lfm-2.5-2.6b:free"
     OPENROUTER_FALLBACK_MODELS: str = "liquid/lfm-2.5-2.6b:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free,nex-agi/nex-n2.5-mini:free"
+
+    # Groq (Ultra-low latency inference: Llama 3.3 70B, Llama 3.1 8B, Mixtral)
+    GROQ_API_KEY: str = ""
+    GROQ_API_KEYS: str = ""
+    GROQ_MAX_KEYS: int = 10
+    GROQ_KEY_COOLDOWN_SECONDS: int = 60
+    GROQ_HEALTH_CHECK_INTERVAL_SECONDS: int = 30
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_FALLBACK_MODELS: str = "llama-3.3-70b-versatile,llama-3.1-8b-instant"
+
+    # Gemini (Google GenAI: Gemini 2.0 Flash, Gemini 1.5 Flash)
+    GEMINI_API_KEY: str = ""
+    GEMINI_API_KEYS: str = ""
+    GEMINI_MAX_KEYS: int = 10
+    GEMINI_KEY_COOLDOWN_SECONDS: int = 60
+    GEMINI_HEALTH_CHECK_INTERVAL_SECONDS: int = 30
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_FALLBACK_MODELS: str = "gemini-2.0-flash,gemini-1.5-flash"
 
     ML_ENABLED: bool = True
     ML_MODELS_DIR: str = "ml/models"
@@ -77,6 +101,71 @@ class Settings(BaseSettings):
                 keys.append(cleaned)
 
         return keys[: max(1, self.OPENROUTER_MAX_KEYS)]
+
+    @property
+    def groq_keys_list(self) -> list[str]:
+        """Collect and deduplicate Groq API keys up to GROQ_MAX_KEYS."""
+        import os
+
+        keys: list[str] = []
+        if self.GROQ_API_KEYS:
+            for k in self.GROQ_API_KEYS.replace("\n", ",").split(","):
+                cleaned = k.strip()
+                if cleaned and cleaned not in keys:
+                    keys.append(cleaned)
+
+        for i in range(1, max(1, self.GROQ_MAX_KEYS) + 1):
+            env_val = os.environ.get(f"GROQ_API_KEY_{i}", "").strip()
+            if env_val and env_val not in keys:
+                keys.append(env_val)
+
+        if self.GROQ_API_KEY:
+            cleaned = self.GROQ_API_KEY.strip()
+            if cleaned and cleaned not in keys:
+                keys.append(cleaned)
+
+        return keys[: max(1, self.GROQ_MAX_KEYS)]
+
+    @property
+    def gemini_keys_list(self) -> list[str]:
+        """Collect and deduplicate Gemini API keys up to GEMINI_MAX_KEYS."""
+        import os
+
+        keys: list[str] = []
+        if self.GEMINI_API_KEYS:
+            for k in self.GEMINI_API_KEYS.replace("\n", ",").split(","):
+                cleaned = k.strip()
+                if cleaned and cleaned not in keys:
+                    keys.append(cleaned)
+
+        for i in range(1, max(1, self.GEMINI_MAX_KEYS) + 1):
+            env_val = os.environ.get(f"GEMINI_API_KEY_{i}", "").strip()
+            if env_val and env_val not in keys:
+                keys.append(env_val)
+
+        if self.GEMINI_API_KEY:
+            cleaned = self.GEMINI_API_KEY.strip()
+            if cleaned and cleaned not in keys:
+                keys.append(cleaned)
+
+        # Fallback to standard GOOGLE_API_KEY if present
+        google_env = os.environ.get("GOOGLE_API_KEY", "").strip()
+        if google_env and google_env not in keys:
+            keys.append(google_env)
+
+        return keys[: max(1, self.GEMINI_MAX_KEYS)]
+
+    @property
+    def groq_fallback_models_list(self) -> list[str]:
+        return [m.strip() for m in self.GROQ_FALLBACK_MODELS.split(",") if m.strip()]
+
+    @property
+    def gemini_fallback_models_list(self) -> list[str]:
+        return [m.strip() for m in self.GEMINI_FALLBACK_MODELS.split(",") if m.strip()]
+
+    @property
+    def llm_providers_list(self) -> list[str]:
+        return [p.strip().lower() for p in self.LLM_PROVIDERS.split(",") if p.strip()]
 
     @property
     def cors_origins_list(self) -> list[str]:

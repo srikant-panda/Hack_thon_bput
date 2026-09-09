@@ -44,6 +44,7 @@ async def lifespan(_app: FastAPI):
     logger.info("Starting CYBERGUARD backend...")
     await init_db()
     rotator = get_key_rotator()
+    rotator.log_startup_summary()
     rotator.start_background_task()
     yield
     logger.info("Shutting down CYBERGUARD backend...")
