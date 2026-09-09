@@ -1,8 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Browser-side Supabase client: anon key only, scoped by RLS.
-// The service role key must never appear in the frontend.
-export const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL ?? '',
-  import.meta.env.VITE_SUPABASE_ANON_KEY ?? ''
-);
+// Do not construct a client until real-backend mode is actually configured.
+// Mock mode intentionally works without a .env file or Supabase project.
+const url = import.meta.env.VITE_SUPABASE_URL;
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+const client = url && anonKey ? createClient(url, anonKey) : null;
+
+export function getSupabase() {
+  if (!client) {
+    throw new Error(
+      'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before using VITE_USE_MOCK=false.'
+    );
+  }
+  return client;
+}

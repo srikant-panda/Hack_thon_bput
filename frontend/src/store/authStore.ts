@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabase } from '../lib/supabaseClient';
 import * as mockApi from '../services/mockApi';
 import type { User } from '../types';
 
@@ -48,7 +48,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await getSupabase().auth.signInWithPassword({ email, password });
     if (error || !data.session) {
       // Surface the Supabase message, e.g. "Invalid login credentials".
       throw new Error(error?.message ?? 'Login failed');
@@ -63,7 +63,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     if (!USE_MOCK) {
-      await supabase.auth.signOut().catch(() => undefined);
+      await getSupabase().auth.signOut().catch(() => undefined);
     }
     localStorage.removeItem(MOCK_STORAGE_KEY);
     set({ user: null, accessToken: null, isAuthenticated: false });
@@ -87,7 +87,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
-      const { data } = await supabase.auth.getSession();
+      const { data } = await getSupabase().auth.getSession();
       const session = data.session;
       if (session) {
         set({

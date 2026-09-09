@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient';
+import { getSupabase } from '../lib/supabaseClient';
 import { useAuthStore } from '../store/authStore';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
@@ -54,6 +54,7 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
 
   // On 401, refresh the Supabase session once and retry with the new token.
   if (res.status === 401) {
+    const supabase = getSupabase();
     const { error } = await supabase.auth.refreshSession();
     const freshToken = (await supabase.auth.getSession()).data.session?.access_token ?? null;
     if (error || !freshToken) {

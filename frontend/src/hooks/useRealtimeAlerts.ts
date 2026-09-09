@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { getSupabase } from '../lib/supabaseClient';
 import { useUiStore } from '../store/uiStore';
 import type { Severity } from '../types';
 
@@ -23,6 +23,7 @@ export function useRealtimeAlerts(enabled: boolean, onRefresh?: () => void): voi
   useEffect(() => {
     if (!enabled || USE_MOCK) return;
 
+    const supabase = getSupabase();
     const channel = supabase
       .channel('cyberguard-alerts')
       .on(

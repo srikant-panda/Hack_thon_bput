@@ -4,11 +4,14 @@ import sys
 
 # --- CONFIGURATION (read from environment; never hardcode secrets) ---
 import os
+import dotenv
+dotenv.load_dotenv()
+
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://YOUR-PROJECT.supabase.co")
 ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "your-anon-key")
-PASSWORD = os.environ.get("CYBERGUARD_PASSWORD", "")
-EMAIL = os.environ.get("CYBERGUARD_EMAIL", "admin@cyberguard.local")
+PASSWORD = os.environ.get("CYBERGUARD_PASSWORD", "Srikant")
+EMAIL = os.environ.get("CYBERGUARD_EMAIL", "srikant@gmail.com")
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000/api/v1")
 
 if not PASSWORD:
@@ -33,6 +36,7 @@ def test_endpoint(name, url, payload, headers):
         print(f"   Status: {res.status_code}")
         if res.ok:
             data = res.json()
+            print(data)
             print(f"   Severity: {data.get('severity')} | Score: {data.get('risk_score')}")
             print(f"   Explanation: {data.get('explanation', '')[:100]}...")
         else:
