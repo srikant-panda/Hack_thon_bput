@@ -55,8 +55,12 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
 
   let res = await execute(useAuthStore.getState().getToken());
 
-  // On 401, refresh the Supabase session once and retry with the new token.
   if (res.status === 401) {
+    const currentToken = useAuthStore.getState().getToken();
+    if (currentToken && (currentToken.includes('demo') || currentToken.includes('mock'))) {
+      await useAuthStore.getState().logout();
+      throw new ApiError('Session expired. Please sign in again.', 401);
+    }
     try {
       const supabase = getSupabase();
       const { error } = await supabase.auth.refreshSession();

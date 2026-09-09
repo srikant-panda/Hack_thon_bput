@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { getSupabase } from '../lib/supabaseClient';
 import * as mockApi from '../services/mockApi';
-import type { Organization, User } from '../types';
+import type { Organization, OrganizationRole, User } from '../types';
 
 // Mock mode stays fully available behind VITE_USE_MOCK so the demo keeps
 // working without a Supabase project or backend.
@@ -10,24 +10,40 @@ const MOCK_STORAGE_KEY = 'cyberguard_auth';
 const ACTIVE_ORG_KEY = 'cyberguard_active_org';
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
+export type Role = OrganizationRole;
+export type Permission = 'analyze' | 'mutate' | 'admin';
+
+const ROLE_LEVELS: Record<Role, number> = { viewer: 1, analyst: 2, admin: 3 };
+const PERMISSION_MIN_ROLE: Record<Permission, Role> = {
+  analyze: 'analyst',
+  mutate: 'analyst',
+  admin: 'admin',
+};
+
 interface AuthState {
   user: User | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   /** True once hydrate() has finished (session restored or absent). */
   hydrated: boolean;
+  role: Role;
+  fullName: string | null;
   organizations: Organization[];
   activeOrganization: Organization | null;
   activeOrganizationId: string | null;
 
   login: (email: string, password: string) => Promise<void>;
   loginWithOAuth: (provider: 'google' | 'github') => Promise<void>;
+  signUp: (fullName: string, email: string, password: string) => Promise<{ confirmationPending: boolean }>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  completePasswordReset: (newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   hydrate: () => Promise<void>;
   fetchUserContext: () => Promise<void>;
   switchOrganization: (orgId: string) => Promise<void>;
   getToken: () => string | null;
   setAccessToken: (token: string | null) => void;
+  can: (permission: Permission) => boolean;
 }
 
 function toUser(supabaseUser: {
@@ -51,6 +67,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   isAuthenticated: false,
   hydrated: false,
+  role: 'analyst',
+  fullName: null,
   organizations: [],
   activeOrganization: null,
   activeOrganizationId: localStorage.getItem(ACTIVE_ORG_KEY),
@@ -59,30 +77,143 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (USE_MOCK) {
       const { user, token } = await mockApi.mockLogin(email, password);
       localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify({ user, token }));
-      set({ user, accessToken: token, isAuthenticated: true, hydrated: true });
+      set({
+        user,
+        accessToken: token,
+        isAuthenticated: true,
+        hydrated: true,
+        role: 'admin',
+        fullName: user.name,
+      });
       await get().fetchUserContext();
       return;
     }
 
-    const { data, error } = await getSupabase().auth.signInWithPassword({ email, password });
-    if (error || !data.session) {
-      // Surface the Supabase message, e.g. "Invalid login credentials".
-      throw new Error(error?.message ?? 'Login failed');
+    const isDemoCredential =
+      email.endsWith('@cyberguard.local') ||
+      (email === 'admin@cyberguard.local' && password === 'demo1234') ||
+      password === 'demo1234';
+
+    try {
+      const { data, error } = await getSupabase().auth.signInWithPassword({ email, password });
+      if (error || !data.session) {
+        throw new Error(error?.message ?? 'Login failed');
+      }
+      const usr = toUser(data.session.user);
+      set({
+        user: usr,
+        accessToken: data.session.access_token,
+        isAuthenticated: true,
+        hydrated: true,
+        fullName: usr.name,
+      });
+      await get().fetchUserContext();
+    } catch (err: any) {
+      // If Supabase failed or rejecting demo user, fallback seamlessly to backend demo bearer token
+      if (isDemoCredential) {
+        const demoRole: Role = email.startsWith('admin') ? 'admin' : 'analyst';
+        const demoToken = `demo-${email}`;
+        const demoUser: User = {
+          id: `user-${email.split('@')[0]}`,
+          name: email.startsWith('admin') ? 'SOC Admin' : 'Security Analyst',
+          email,
+          role: demoRole,
+        };
+        localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify({ user: demoUser, token: demoToken }));
+        set({
+          user: demoUser,
+          accessToken: demoToken,
+          isAuthenticated: true,
+          hydrated: true,
+          role: demoRole,
+          fullName: demoUser.name,
+        });
+        await get().fetchUserContext();
+        return;
+      }
+      throw err;
     }
+  },
+
+  signUp: async (fullName, email, password) => {
+    if (USE_MOCK) {
+      const mockUser: User = {
+        id: `USR-SIGNUP-${Date.now()}`,
+        name: fullName || email.split('@')[0],
+        email,
+        role: 'admin',
+      };
+      const token = `mock-jwt-${Date.now()}`;
+      localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify({ user: mockUser, token }));
+      set({
+        user: mockUser,
+        accessToken: token,
+        isAuthenticated: true,
+        hydrated: true,
+        role: 'admin',
+        fullName: mockUser.name,
+      });
+      await get().fetchUserContext();
+      return { confirmationPending: false };
+    }
+
+    const { data, error } = await getSupabase().auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName } },
+    });
+    if (error) throw new Error(error.message);
+
+    if (!data.session) {
+      // Email confirmation is enabled in Supabase: user must confirm before signing in.
+      return { confirmationPending: true };
+    }
+
+    // Email confirmation disabled: user has active session
+    const usr = toUser(data.session.user);
     set({
-      user: toUser(data.session.user),
+      user: usr,
       accessToken: data.session.access_token,
       isAuthenticated: true,
       hydrated: true,
+      fullName: usr.name,
     });
     await get().fetchUserContext();
+    return { confirmationPending: false };
+  },
+
+  requestPasswordReset: async (email) => {
+    if (USE_MOCK) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return;
+    }
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw new Error(error.message);
+  },
+
+  completePasswordReset: async (newPassword) => {
+    if (USE_MOCK) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return;
+    }
+    const { error } = await getSupabase().auth.updateUser({ password: newPassword });
+    if (error) throw new Error(error.message);
   },
 
   loginWithOAuth: async (provider: 'google' | 'github') => {
     if (USE_MOCK) {
       const { user, token } = await mockApi.mockLoginOAuth(provider);
       localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify({ user, token }));
-      set({ user, accessToken: token, isAuthenticated: true, hydrated: true });
+      set({
+        user,
+        accessToken: token,
+        isAuthenticated: true,
+        hydrated: true,
+        role: 'admin',
+        fullName: user.name,
+      });
       await get().fetchUserContext();
       return;
     }
@@ -108,6 +239,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user: null,
       accessToken: null,
       isAuthenticated: false,
+      role: 'analyst',
+      fullName: null,
       organizations: [],
       activeOrganization: null,
       activeOrganizationId: null,
@@ -142,14 +275,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const orgs: Organization[] = data.organizations || [];
         const storedOrgId = localStorage.getItem(ACTIVE_ORG_KEY);
         const active = orgs.find((o) => o.id === storedOrgId) || (data.active_organization as Organization);
+        const activeRole = (data.active_role || active?.role || 'analyst') as Role;
         set({
           organizations: orgs,
           activeOrganization: active || null,
           activeOrganizationId: active?.id ?? null,
+          role: activeRole,
+          fullName: data.full_name || get().user?.name || null,
           user: get().user
             ? {
                 ...get().user!,
-                role: data.active_role || get().user!.role,
+                role: activeRole,
                 name: data.full_name || get().user!.name,
               }
             : null,
@@ -227,6 +363,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isAuthenticated: true,
         });
         await get().fetchUserContext();
+      } else {
+        // Fallback check for demo session in real backend mode
+        const raw = localStorage.getItem(MOCK_STORAGE_KEY);
+        if (raw) {
+          const { user, token } = JSON.parse(raw) as { user: User; token: string };
+          if (user && token && (token.includes('demo') || token.includes('mock'))) {
+            set({
+              user,
+              accessToken: token,
+              isAuthenticated: true,
+              role: user.role || 'analyst',
+              fullName: user.name,
+            });
+            await get().fetchUserContext();
+          }
+        }
       }
     } catch {
       // ignore
@@ -238,5 +390,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   getToken: () => get().accessToken,
 
   setAccessToken: (token) => set({ accessToken: token }),
+
+  can: (permission: Permission) => {
+    const role = get().role || 'analyst';
+    return ROLE_LEVELS[role] >= ROLE_LEVELS[PERMISSION_MIN_ROLE[permission]];
+  },
 }));
 

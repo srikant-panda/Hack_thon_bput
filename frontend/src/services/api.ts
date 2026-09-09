@@ -11,6 +11,8 @@ import type {
   ThreatModule,
   User,
   Organization,
+  OrganizationMember,
+  OrganizationRole,
   UserContext,
 } from '../types';
 import * as mockApi from './mockApi';
@@ -61,24 +63,6 @@ export async function logout(): Promise<void> {
     return;
   }
   await useAuthStore.getState().logout();
-}
-
-export async function listOrganizations(): Promise<Organization[]> {
-  if (USE_MOCK) return mockApi.mockListOrganizations();
-  const rows = await apiFetch('/organizations');
-  return Array.isArray(rows) ? rows : [];
-}
-
-export async function createOrganization(name: string): Promise<Organization> {
-  if (USE_MOCK) return mockApi.mockCreateOrganization(name);
-  return apiFetch('/organizations', {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-  });
-}
-
-export async function switchOrganization(orgId: string): Promise<void> {
-  await useAuthStore.getState().switchOrganization(orgId);
 }
 
 export async function getUserProfile(): Promise<UserContext> {
@@ -345,6 +329,212 @@ export async function assistantChat(message: string): Promise<string> {
 export async function addAlert(alert: Alert): Promise<void> {
   if (USE_MOCK) return mockApi.mockAddAlert(alert);
   return notYetIntegrated('addAlert', async () => mockApi.mockAddAlert(alert));
+}
+
+// ---------------------------------------------------------------------------
+// Organizations & Team Member Management
+// ---------------------------------------------------------------------------
+
+export async function listOrganizations(): Promise<Organization[]> {
+  if (USE_MOCK) {
+    const ctx = await mockApi.mockGetUserContext();
+    return ctx.organizations;
+  }
+  const rows = await apiFetch('/organizations');
+  return Array.isArray(rows) ? (rows as Organization[]) : [];
+}
+
+export async function createOrganization(name: string): Promise<Organization> {
+  if (USE_MOCK) {
+    const newOrg: Organization = {
+      id: `org-${Date.now()}`,
+      name,
+      slug: name.toLowerCase().replace(/\s+/g, '-'),
+      is_personal: false,
+      role: 'admin',
+      created_at: new Date().toISOString(),
+    };
+    return newOrg;
+  }
+  const org = await apiFetch('/organizations', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+  await useAuthStore.getState().fetchUserContext();
+  return org as Organization;
+}
+
+export async function getOrganization(orgId: string): Promise<Organization> {
+  if (USE_MOCK) {
+    const ctx = await mockApi.mockGetUserContext();
+    const found = ctx.organizations.find((o) => o.id === orgId);
+    if (found) return found;
+    return {
+      id: ctx.active_organization.id,
+      name: ctx.active_organization.name,
+      slug: 'active-org',
+      is_personal: ctx.active_organization.is_personal,
+      role: ctx.active_organization.role,
+    };
+  }
+  const org = await apiFetch(`/organizations/${orgId}`);
+  return org as Organization;
+}
+
+export async function listOrganizationMembers(orgId: string): Promise<OrganizationMember[]> {
+  if (USE_MOCK) {
+    return [
+      {
+        id: 'mem-1',
+        organizationId: orgId,
+        userId: 'u-1',
+        email: 'admin@cyberguard.local',
+        fullName: 'Lead Analyst (Admin)',
+        role: 'admin',
+        joinedAt: new Date(Date.now() - 86400000 * 30).toISOString(),
+      },
+      {
+        id: 'mem-2',
+        organizationId: orgId,
+        userId: 'u-2',
+        email: 'analyst@cyberguard.local',
+        fullName: 'Security Analyst',
+        role: 'analyst',
+        joinedAt: new Date(Date.now() - 86400000 * 14).toISOString(),
+      },
+      {
+        id: 'mem-3',
+        organizationId: orgId,
+        userId: 'u-3',
+        email: 'auditor@cyberguard.local',
+        fullName: 'SOC Auditor',
+        role: 'viewer',
+        joinedAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+      },
+    ];
+  }
+  const rows = await apiFetch(`/organizations/${orgId}/members`);
+  if (!Array.isArray(rows)) return [];
+  return rows.map((r: any) => ({
+    id: r.id,
+    organizationId: r.organization_id,
+    userId: r.user_id,
+    email: r.email,
+    fullName: r.full_name,
+    role: r.role as OrganizationRole,
+    joinedAt: r.joined_at,
+  }));
+}
+
+export async function addOrganizationMember(
+  orgId: string,
+  email: string,
+  role: OrganizationRole
+): Promise<OrganizationMember> {
+  if (USE_MOCK) {
+    return {
+      id: `mem-${Date.now()}`,
+      organizationId: orgId,
+      userId: `user-${Date.now()}`,
+      email,
+      fullName: email.split('@')[0],
+      role,
+      joinedAt: new Date().toISOString(),
+    };
+  }
+  const res = await apiFetch(`/organizations/${orgId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ email, role }),
+  });
+  return {
+    id: res.id,
+    organizationId: res.organization_id,
+    userId: res.user_id,
+    email: res.email,
+    fullName: res.full_name,
+    role: res.role as OrganizationRole,
+    joinedAt: res.joined_at,
+  };
+}
+
+export async function updateOrganizationMemberRole(
+  orgId: string,
+  targetUserId: string,
+  role: OrganizationRole
+): Promise<OrganizationMember> {
+  if (USE_MOCK) {
+    return {
+      id: `mem-${targetUserId}`,
+      organizationId: orgId,
+      userId: targetUserId,
+      role,
+      joinedAt: new Date().toISOString(),
+    };
+  }
+  const res = await apiFetch(`/organizations/${orgId}/members/${targetUserId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+  return {
+    id: res.id,
+    organizationId: res.organization_id,
+    userId: res.user_id,
+    email: res.email,
+    fullName: res.full_name,
+    role: res.role as OrganizationRole,
+    joinedAt: res.joined_at,
+  };
+}
+
+export async function removeOrganizationMember(orgId: string, targetUserId: string): Promise<void> {
+  if (USE_MOCK) return;
+  await apiFetch(`/organizations/${orgId}/members/${targetUserId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function switchOrganization(orgId: string): Promise<void> {
+  await useAuthStore.getState().switchOrganization(orgId);
+}
+
+// ---------------------------------------------------------------------------
+// Admin User Management
+// ---------------------------------------------------------------------------
+
+export interface AdminUser {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  role: 'viewer' | 'analyst' | 'admin';
+  created_at: string | null;
+}
+
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  if (USE_MOCK) {
+    await new Promise((r) => setTimeout(r, 200));
+    return [
+      { id: 'USR-001', email: 'admin@cyberguard.local', full_name: 'SOC Administrator', role: 'admin', created_at: new Date('2026-01-05').toISOString() },
+      { id: 'USR-002', email: 'analyst@cyberguard.local', full_name: 'Demo Analyst', role: 'analyst', created_at: new Date('2026-01-06').toISOString() },
+      { id: 'USR-003', email: 'viewer@cyberguard.local', full_name: 'Demo Viewer', role: 'viewer', created_at: new Date('2026-01-07').toISOString() },
+    ];
+  }
+  const rows = await apiFetch('/admin/users');
+  return (Array.isArray(rows) ? rows : []) as AdminUser[];
+}
+
+export async function updateUserRole(
+  userId: string,
+  role: 'viewer' | 'analyst' | 'admin'
+): Promise<AdminUser> {
+  if (USE_MOCK) {
+    await new Promise((r) => setTimeout(r, 200));
+    return { id: userId, email: null, full_name: null, role, created_at: null };
+  }
+  const row = await apiFetch(`/admin/users/${userId}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+  return row as AdminUser;
 }
 
 export function isMockMode(): boolean {

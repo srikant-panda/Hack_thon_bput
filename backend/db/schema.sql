@@ -36,6 +36,26 @@ create table profiles (
     created_at timestamptz not null default now()
 );
 
+-- Organizations and Multi-Tenant Workspaces
+create table organizations (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    slug text not null unique,
+    is_personal boolean not null default false,
+    owner_id uuid references auth.users (id) on delete cascade,
+    created_at timestamptz not null default now()
+);
+
+-- Organization Members with Role-Based Access Control (RBAC)
+create table organization_members (
+    id uuid primary key default gen_random_uuid(),
+    organization_id uuid not null references organizations (id) on delete cascade,
+    user_id uuid not null references auth.users (id) on delete cascade,
+    role text not null default 'analyst' check (role in ('admin', 'analyst', 'viewer')),
+    joined_at timestamptz not null default now(),
+    constraint uq_org_user unique (organization_id, user_id)
+);
+
 create table events (
     id uuid primary key default gen_random_uuid(),
     event_type text not null,

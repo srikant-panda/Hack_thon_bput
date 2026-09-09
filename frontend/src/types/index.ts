@@ -224,3 +224,14 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
 }
+
+export interface OrganizationMember {
+  id: string;
+  organizationId: string;
+  userId: string;
+  email?: string | null;
+  fullName?: string | null;
+  role: OrganizationRole;
+  joinedAt: string;
+}
+
