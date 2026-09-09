@@ -1,6 +1,6 @@
 """Pydantic schemas for response execution endpoints (Part 6)."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,4 +23,7 @@ class ResponseExecutionResponse(BaseModel):
     status: str
     executed_by: Optional[str] = None
     approved_by: Optional[str] = None
-    created_at: Optional[str] = None
+    created_at: Optional[Any] = None
+
+    model_config = {"from_attributes": True}
+

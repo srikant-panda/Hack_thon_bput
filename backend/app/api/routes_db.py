@@ -1,29 +1,44 @@
-"""Database introspection endpoints."""
+"""Database introspection endpoints using Async SQLAlchemy."""
+
+from typing import Any
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user
-from app.core.supabase_client import get_supabase
+from app.core.security import CurrentUser, get_current_user
+from app.db.models import Alert, AuditLog, Event, Incident, Organization, ResponseExecution, User
+from app.db.session import get_db
 
 router = APIRouter(tags=["db"])
 
-MONITORED_TABLES = ("events", "alerts", "incidents", "audit_logs")
+MODEL_MAP = {
+    "users": User,
+    "organizations": Organization,
+    "events": Event,
+    "alerts": Alert,
+    "incidents": Incident,
+    "response_executions": ResponseExecution,
+    "audit_logs": AuditLog,
+}
 
 
 @router.get("/db/check")
-def check_database(_user: dict = Depends(get_current_user)) -> dict:
-    """Return row counts for the core tables using the service role client."""
-    client = get_supabase()
+async def check_database(
+    _user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Return row counts for core tables using Async SQLAlchemy."""
     counts: dict[str, int | None] = {}
     errors: dict[str, str] = {}
 
-    for table in MONITORED_TABLES:
+    for name, model in MODEL_MAP.items():
         try:
-            response = client.table(table).select("id", count="exact").limit(1).execute()
-            counts[table] = response.count or 0
+            res = await db.execute(select(func.count()).select_from(model))
+            counts[name] = res.scalar() or 0
         except Exception as exc:
-            counts[table] = None
-            errors[table] = str(exc)
+            counts[name] = None
+            errors[name] = str(exc)
 
     payload: dict = {"tables": counts}
     if errors:

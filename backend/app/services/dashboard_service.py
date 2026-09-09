@@ -1,17 +1,17 @@
-"""Dashboard summary service (Part 6).
+"""Dashboard summary service using Async SQLAlchemy."""
 
-Supabase's REST API does not support SQL GROUP BY, so this service fetch
-the relevant rows and performs all grouping/counting in Python. This is
-acceptable for a prototype with moderate data volume.
-"""
-
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import HTTPException, status
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.supabase_client import get_supabase
+from app.db.models import Alert, Event, Incident
+
+logger = logging.getLogger("cyberguard.dashboard")
 
 SEVERITY_ORDER = ["safe", "low", "medium", "high", "critical"]
 SEVERITY_COLORS = {
@@ -35,20 +35,8 @@ INCIDENT_STATUSES = ["open", "investigating", "contained", "closed"]
 TIMELINE_HOURS = 24
 
 
-def _parse_ts(value: Any) -> Optional[datetime]:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def _build_attack_timeline(
-    alerts: list[dict], events: list[dict], now: datetime
+    alerts: list[Alert], events: list[Event], now: datetime
 ) -> list[dict[str, Any]]:
     """Bucket alerts and events into the last 24 hourly slots."""
     buckets: dict[str, dict[str, Any]] = {}
@@ -64,33 +52,33 @@ def _build_attack_timeline(
         }
 
     for alert in alerts:
-        parsed = _parse_ts(alert.get("created_at"))
-        if parsed is None:
+        created_at = alert.created_at
+        if created_at is None:
             continue
-        key = parsed.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H")
+        key = created_at.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H")
         if key in buckets:
             buckets[key]["threats"] += 1
 
     for event in events:
-        parsed = _parse_ts(event.get("created_at"))
-        if parsed is None:
+        created_at = event.created_at
+        if created_at is None:
             continue
-        key = parsed.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H")
+        key = created_at.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H")
         if key in buckets:
             buckets[key]["events"] += 1
 
     return list(buckets.values())
 
 
-def _top_targeted_users(alerts: list[dict]) -> list[dict[str, Any]]:
-    """Group alerts by target_user; input is ordered newest first."""
+def _top_targeted_users(alerts: list[Alert]) -> list[dict[str, Any]]:
+    """Group alerts by target_user."""
     stats: dict[str, dict[str, Any]] = {}
     for alert in alerts:
-        target_user = alert.get("target_user")
+        target_user = alert.target_user
         if not target_user:
             continue
         entry = stats.setdefault(
-            target_user, {"attacks": 0, "last_attack": alert.get("created_at")}
+            target_user, {"attacks": 0, "last_attack": alert.created_at.isoformat() if alert.created_at else None}
         )
         entry["attacks"] += 1
     ranked = sorted(stats.items(), key=lambda item: item[1]["attacks"], reverse=True)
@@ -100,21 +88,21 @@ def _top_targeted_users(alerts: list[dict]) -> list[dict[str, Any]]:
     ]
 
 
-def _top_targeted_services(alerts: list[dict]) -> list[dict[str, Any]]:
+def _top_targeted_services(alerts: list[Alert]) -> list[dict[str, Any]]:
     """Group alerts by target_service with the highest severity seen."""
     stats: dict[str, dict[str, Any]] = {}
     for alert in alerts:
-        target_service = alert.get("target_service")
+        target_service = alert.target_service
         if not target_service:
             continue
         entry = stats.setdefault(
             target_service, {"attacks": 0, "risk_rank": -1, "risk_level": None}
         )
         entry["attacks"] += 1
-        rank = SEVERITY_RANK.get(alert.get("severity"), -1)
+        rank = SEVERITY_RANK.get(alert.severity, -1)
         if rank > entry["risk_rank"]:
             entry["risk_rank"] = rank
-            entry["risk_level"] = alert.get("severity")
+            entry["risk_level"] = alert.severity
     ranked = sorted(stats.items(), key=lambda item: item[1]["attacks"], reverse=True)
     return [
         {
@@ -126,41 +114,32 @@ def _top_targeted_services(alerts: list[dict]) -> list[dict[str, Any]]:
     ]
 
 
-async def get_dashboard_summary() -> dict[str, Any]:
-    """Build the complete dashboard summary."""
-    client = get_supabase()
-    try:
-        alerts = (
-            client.table("alerts")
-            .select("id, module, severity, target_user, target_service, created_at")
-            .order("created_at", desc=True)
-            .execute()
-            .data
-            or []
-        )
-        events = (
-            client.table("events").select("id, created_at").execute().data or []
-        )
-        incidents = (
-            client.table("incidents").select("id, status").execute().data or []
-        )
-        recent_alerts = (
-            client.table("alerts")
-            .select("*")
-            .order("created_at", desc=True)
-            .limit(10)
-            .execute()
-            .data
-            or []
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to load dashboard data",
-        ) from exc
+async def get_dashboard_summary(db: AsyncSession, organization_id: str) -> dict[str, Any]:
+    """Build the complete dashboard summary for the specified organization."""
+    # Load alerts
+    alerts_res = await db.execute(
+        select(Alert)
+        .options(selectinload(Alert.recommended_actions))
+        .where(Alert.organization_id == organization_id)
+        .order_by(desc(Alert.created_at))
+    )
+    alerts = list(alerts_res.scalars().all())
 
-    module_counts = Counter(alert.get("module") for alert in alerts)
-    severity_counts = Counter(alert.get("severity") for alert in alerts)
+    # Load events
+    events_res = await db.execute(
+        select(Event).where(Event.organization_id == organization_id)
+    )
+    events = list(events_res.scalars().all())
+
+    # Load incidents
+    incidents_res = await db.execute(
+        select(Incident).where(Incident.organization_id == organization_id)
+    )
+    incidents = list(incidents_res.scalars().all())
+
+    # Counts
+    module_counts = Counter(alert.module for alert in alerts)
+    severity_counts = Counter(alert.severity for alert in alerts)
 
     risk_distribution = [
         {
@@ -177,9 +156,39 @@ async def get_dashboard_summary() -> dict[str, Any]:
 
     incident_summary = {status_name: 0 for status_name in INCIDENT_STATUSES}
     for incident in incidents:
-        incident_status = incident.get("status")
-        if incident_status in incident_summary:
-            incident_summary[incident_status] += 1
+        if incident.status in incident_summary:
+            incident_summary[incident.status] += 1
+
+    recent_alerts_serialized = []
+    for alert in alerts[:10]:
+        recent_alerts_serialized.append(
+            {
+                "id": alert.id,
+                "title": alert.title,
+                "module": alert.module,
+                "threat_type": alert.threat_type,
+                "severity": alert.severity,
+                "risk_score": alert.risk_score,
+                "status": alert.status,
+                "summary": alert.summary,
+                "target_user": alert.target_user,
+                "target_service": alert.target_service,
+                "source_ip": alert.source_ip,
+                "created_at": alert.created_at.isoformat() if alert.created_at else None,
+                "recommended_actions": [
+                    {
+                        "id": act.id,
+                        "action": act.action,
+                        "description": act.description,
+                        "automation_level": act.automation_level,
+                        "requires_approval": act.requires_approval,
+                        "priority": act.priority,
+                        "executed": act.executed,
+                    }
+                    for act in alert.recommended_actions
+                ],
+            }
+        )
 
     return {
         "total_events_analyzed": len(events),
@@ -195,6 +204,6 @@ async def get_dashboard_summary() -> dict[str, Any]:
         "attack_timeline": _build_attack_timeline(alerts, events, datetime.now(timezone.utc)),
         "top_targeted_users": _top_targeted_users(alerts),
         "top_targeted_services": _top_targeted_services(alerts),
-        "recent_alerts": recent_alerts,
+        "recent_alerts": recent_alerts_serialized,
         "incident_summary": incident_summary,
     }

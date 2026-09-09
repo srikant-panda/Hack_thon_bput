@@ -10,6 +10,8 @@ import type {
   Severity,
   ThreatModule,
   User,
+  Organization,
+  UserContext,
 } from '../types';
 import * as mockApi from './mockApi';
 import { db, addAuditLog } from './mockData';
@@ -49,9 +51,39 @@ export async function login(email: string, password: string): Promise<{ user: Us
   return { user: state.user as User, token: state.accessToken ?? '' };
 }
 
+export async function loginWithOAuth(provider: 'google' | 'github'): Promise<void> {
+  await useAuthStore.getState().loginWithOAuth(provider);
+}
+
 export async function logout(): Promise<void> {
-  if (USE_MOCK) return;
+  if (USE_MOCK) {
+    await useAuthStore.getState().logout();
+    return;
+  }
   await useAuthStore.getState().logout();
+}
+
+export async function listOrganizations(): Promise<Organization[]> {
+  if (USE_MOCK) return mockApi.mockListOrganizations();
+  const rows = await apiFetch('/organizations');
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function createOrganization(name: string): Promise<Organization> {
+  if (USE_MOCK) return mockApi.mockCreateOrganization(name);
+  return apiFetch('/organizations', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function switchOrganization(orgId: string): Promise<void> {
+  await useAuthStore.getState().switchOrganization(orgId);
+}
+
+export async function getUserProfile(): Promise<UserContext> {
+  if (USE_MOCK) return mockApi.mockGetUserContext();
+  return apiFetch('/auth/me');
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {

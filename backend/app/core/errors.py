@@ -1,0 +1,128 @@
+"""Unified application errors and error handlers."""
+
+import logging
+from typing import Any, Optional
+from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger("cyberguard.errors")
+
+
+class AppError(Exception):
+    """Base application exception."""
+
+    def __init__(
+        self,
+        message: str,
+        code: str = "app_error",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+        details: Optional[Any] = None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.status_code = status_code
+        self.details = details
+
+
+class NotFoundError(AppError):
+    def __init__(self, resource: str, identifier: str = ""):
+        message = f"{resource} not found" if not identifier else f"{resource} '{identifier}' not found"
+        super().__init__(message, code="not_found", status_code=status.HTTP_404_NOT_FOUND)
+
+
+class PermissionDeniedError(AppError):
+    def __init__(self, message: str = "You do not have permission to perform this action"):
+        super().__init__(message, code="permission_denied", status_code=status.HTTP_403_FORBIDDEN)
+
+
+class ValidationError(AppError):
+    def __init__(self, message: str, details: Optional[Any] = None):
+        super().__init__(message, code="validation_error", status_code=status.HTTP_400_BAD_REQUEST, details=details)
+
+
+class ConflictError(AppError):
+    def __init__(self, message: str):
+        super().__init__(message, code="conflict", status_code=status.HTTP_409_CONFLICT)
+
+
+class ExternalServiceError(AppError):
+    def __init__(self, service: str, message: str):
+        super().__init__(
+            f"External service error ({service}): {message}",
+            code="external_service_error",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        )
+
+
+def register_error_handlers(app: FastAPI) -> None:
+    """Register unified exception handlers on the FastAPI app."""
+
+    @app.exception_handler(AppError)
+    async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
+        content = {
+            "error": exc.code,
+            "message": exc.message,
+        }
+        if exc.details is not None:
+            content["details"] = jsonable_encoder(exc.details)
+        return JSONResponse(status_code=exc.status_code, content=content)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "invalid_payload",
+                "message": "Request payload failed validation.",
+                "details": jsonable_encoder(exc.errors()),
+            },
+        )
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error_handler(_request: Request, exc: IntegrityError) -> JSONResponse:
+        logger.warning("Database integrity error: %s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error": "conflict_error",
+                "message": "Database constraint violation or conflict.",
+            },
+        )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def sqlalchemy_error_handler(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
+        logger.exception("Database error occurred: %s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "database_error",
+                "message": "A database error occurred while processing the request.",
+            },
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": "http_error",
+                "message": exc.detail if isinstance(exc.detail, str) else "HTTP exception",
+                "details": exc.detail if not isinstance(exc.detail, str) else None,
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "internal_server_error",
+                "message": "An unexpected error occurred. Please try again later.",
+            },
+        )

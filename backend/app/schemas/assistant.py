@@ -14,3 +14,8 @@ class AssistantResponse(BaseModel):
 
     reply: str
     context_used: list[str] = []
+
+
+AssistantChatRequest = AssistantMessage
+AssistantChatResponse = AssistantResponse
+

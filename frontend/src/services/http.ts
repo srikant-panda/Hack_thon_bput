@@ -40,29 +40,38 @@ async function parseErrorResponse(res: Response): Promise<ApiError> {
 
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<any> {
   const isFormData = options.body instanceof FormData;
-  const execute = (token: string | null) =>
-    fetch(`${BASE_URL}${path}`, {
+  const execute = (token: string | null) => {
+    const activeOrgId = useAuthStore.getState().activeOrganizationId;
+    return fetch(`${BASE_URL}${path}`, {
       ...options,
       headers: {
         ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(activeOrgId ? { 'X-Organization-Id': activeOrgId } : {}),
         ...(options.headers ?? {}),
       },
     });
+  };
 
   let res = await execute(useAuthStore.getState().getToken());
 
   // On 401, refresh the Supabase session once and retry with the new token.
   if (res.status === 401) {
-    const supabase = getSupabase();
-    const { error } = await supabase.auth.refreshSession();
-    const freshToken = (await supabase.auth.getSession()).data.session?.access_token ?? null;
-    if (error || !freshToken) {
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.auth.refreshSession();
+      const freshToken = (await supabase.auth.getSession()).data.session?.access_token ?? null;
+      if (error || !freshToken) {
+        await useAuthStore.getState().logout();
+        throw new ApiError('Session expired. Please sign in again.', 401);
+      }
+      useAuthStore.getState().setAccessToken(freshToken);
+      res = await execute(freshToken);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
       await useAuthStore.getState().logout();
       throw new ApiError('Session expired. Please sign in again.', 401);
     }
-    useAuthStore.getState().setAccessToken(freshToken);
-    res = await execute(freshToken);
   }
 
   if (!res.ok) throw await parseErrorResponse(res);

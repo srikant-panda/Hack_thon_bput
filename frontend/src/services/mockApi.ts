@@ -10,6 +10,8 @@ import type {
   Severity,
   ThreatModule,
   User,
+  Organization,
+  UserContext,
 } from '../types';
 import {
   analyzeApiLog,
@@ -52,6 +54,79 @@ export async function mockLogin(email: string, password: string): Promise<{ user
     return { user: DEMO_USER, token: `mock-jwt-${Date.now()}` };
   }
   throw new Error('Invalid credentials. Use admin@cyberguard.local / demo1234');
+}
+
+const MOCK_ORGS: Organization[] = [
+  {
+    id: 'org-personal-001',
+    name: 'Personal Workspace',
+    slug: 'personal-workspace',
+    is_personal: true,
+    role: 'admin',
+  },
+  {
+    id: 'org-corp-001',
+    name: 'Enterprise SOC Operations',
+    slug: 'enterprise-soc-operations',
+    is_personal: false,
+    role: 'admin',
+  },
+];
+
+export async function mockLoginOAuth(provider: 'google' | 'github'): Promise<{ user: User; token: string }> {
+  await jitter();
+  const oauthUser: User = {
+    id: `USR-${provider.toUpperCase()}-001`,
+    name: provider === 'google' ? 'Google SOC Specialist' : 'GitHub Security Engineer',
+    email: provider === 'google' ? 'analyst@gmail.com' : 'devsecops@github.com',
+    role: 'admin',
+  };
+  addAuditLog({
+    userId: oauthUser.id,
+    userName: oauthUser.email,
+    action: 'OAUTH_LOGIN',
+    resource: `auth/${provider}`,
+    details: `Successful OAuth login with ${provider}`,
+  });
+  return { user: oauthUser, token: `mock-oauth-${provider}-${Date.now()}` };
+}
+
+export async function mockGetUserContext(): Promise<UserContext> {
+  await jitter();
+  return {
+    id: DEMO_USER.id,
+    email: DEMO_USER.email,
+    full_name: DEMO_USER.name,
+    is_single_user: false,
+    active_role: 'admin',
+    active_organization: {
+      id: MOCK_ORGS[0].id,
+      name: MOCK_ORGS[0].name,
+      is_personal: MOCK_ORGS[0].is_personal,
+      role: MOCK_ORGS[0].role,
+    },
+    personal_organization_id: MOCK_ORGS[0].id,
+    organizations: [...MOCK_ORGS],
+  };
+}
+
+export async function mockListOrganizations(): Promise<Organization[]> {
+  await jitter();
+  return [...MOCK_ORGS];
+}
+
+export async function mockCreateOrganization(name: string): Promise<Organization> {
+  await jitter();
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const newOrg: Organization = {
+    id: `org-${Date.now()}`,
+    name,
+    slug,
+    is_personal: false,
+    role: 'admin',
+  };
+  MOCK_ORGS.push(newOrg);
+  return newOrg;
 }
 
 // ---------------------------------------------------------------------------

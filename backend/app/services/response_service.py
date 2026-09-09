@@ -1,131 +1,85 @@
-"""Response execution service (Part 6).
-
-Executes catalog response actions with the human-approval gate. Actions
-are recorded in response_executions and audited; no destructive side
-effects are performed in this prototype.
-"""
+"""Response execution service using Async SQLAlchemy."""
 
 import logging
-from typing import Any
+import uuid
+from typing import Any, Optional
 
-from fastapi import HTTPException, status
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.supabase_client import get_supabase
+from app.core.errors import NotFoundError, PermissionDeniedError
+from app.db.models import ResponseCatalog, ResponseExecution
 from app.services import audit_service
 
 logger = logging.getLogger("cyberguard.response")
 
 
-async def get_response_catalog() -> list[dict[str, Any]]:
+async def get_response_catalog(db: AsyncSession) -> list[ResponseCatalog]:
     """Fetch the full response action catalog."""
-    try:
-        response = (
-            get_supabase().table("response_catalog").select("*").order("action").execute()
-        )
-    except Exception as exc:
-        logger.exception("Failed to fetch response catalog")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch response catalog",
-        ) from exc
-    return response.data or []
+    result = await db.execute(select(ResponseCatalog).order_by(ResponseCatalog.action))
+    return list(result.scalars().all())
 
 
 async def execute_response(
-    catalog_id: str, target: str, approved: bool, executed_by: str
-) -> dict[str, Any]:
-    """Execute (or reject) a catalog response action against a target."""
-    client = get_supabase()
-    try:
-        catalog_rows = (
-            client.table("response_catalog")
-            .select("*")
-            .eq("id", catalog_id)
-            .limit(1)
-            .execute()
-            .data
-            or []
-        )
-    except Exception as exc:
-        logger.exception("Failed to fetch catalog entry %s", catalog_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch catalog entry",
-        ) from exc
+    db: AsyncSession,
+    *,
+    organization_id: str,
+    catalog_id: str,
+    target: Optional[str],
+    approved: bool,
+    executed_by: str,
+    user_role: str = "analyst",
+) -> ResponseExecution:
+    """Execute a response action with human approval check and audit logging."""
+    catalog_query = await db.execute(select(ResponseCatalog).where(ResponseCatalog.id == catalog_id))
+    catalog = catalog_query.scalar_one_or_none()
+    if catalog is None:
+        raise NotFoundError("Response catalog action", catalog_id)
 
-    if not catalog_rows:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Catalog entry not found",
-        )
-    catalog = catalog_rows[0]
-    action_name = catalog["action"]
+    # Check approval gate
+    if catalog.requires_approval and not approved:
+        raise PermissionDeniedError("This action requires explicit approval")
 
-    if catalog.get("requires_approval") and not approved:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This action requires explicit approval",
-        )
+    execution_status = "executed"
 
-    # Actions run without approval are auto-executed; approved actions are
-    # executed with the approver recorded. (The 403 above handles
-    # approval-required actions that were not approved.)
-    execution_status = "executed" if approved or not catalog.get("requires_approval") else "rejected"
-
-    try:
-        response = (
-            client.table("response_executions")
-            .insert(
-                {
-                    "catalog_id": catalog_id,
-                    "action_name": action_name,
-                    "target": target,
-                    "status": execution_status,
-                    "executed_by": executed_by,
-                    "approved_by": executed_by if approved else None,
-                }
-            )
-            .execute()
-        )
-    except Exception as exc:
-        logger.exception("Failed to record response execution")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to record response execution",
-        ) from exc
-
-    rows = response.data or []
-    if not rows:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Response execution returned no data",
-        )
+    execution = ResponseExecution(
+        id=str(uuid.uuid4()),
+        organization_id=organization_id,
+        catalog_id=catalog.id,
+        action_name=catalog.action,
+        target=target,
+        status=execution_status,
+        executed_by=executed_by,
+        approved_by=executed_by if approved else None,
+    )
+    db.add(execution)
+    await db.commit()
+    await db.refresh(execution)
 
     await audit_service.log_action(
-        executed_by,
-        executed_by,
-        f"Response executed: {action_name}",
-        target,
-        f"Status: {execution_status}; approved: {approved}",
+        db,
+        organization_id=organization_id,
+        user_id=executed_by,
+        user_name=executed_by,
+        action=f"Response executed: {catalog.action}",
+        resource=f"execution:{execution.id}",
+        details=f"Target: {target}; Status: {execution_status}; Approved: {approved}",
     )
-    return rows[0]
+
+    return execution
 
 
-async def get_execution_history(limit: int = 50) -> list[dict[str, Any]]:
-    """Fetch recent response executions, newest first."""
-    try:
-        response = (
-            get_supabase()
-            .table("response_executions")
-            .select("*")
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-    except Exception as exc:
-        logger.exception("Failed to fetch execution history")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch execution history",
-        ) from exc
-    return response.data or []
+async def get_execution_history(
+    db: AsyncSession,
+    organization_id: str,
+    limit: int = 50,
+) -> list[ResponseExecution]:
+    """Fetch recent response executions scoped to the active organization."""
+    query = (
+        select(ResponseExecution)
+        .where(ResponseExecution.organization_id == organization_id)
+        .order_by(desc(ResponseExecution.created_at))
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())

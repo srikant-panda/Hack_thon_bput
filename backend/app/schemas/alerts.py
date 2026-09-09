@@ -1,6 +1,6 @@
 """Pydantic schemas for alert management endpoints (Part 6)."""
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,19 @@ class AlertStatusUpdate(BaseModel):
     status: AlertStatusValue
 
 
+class RecommendedActionResponse(BaseModel):
+    id: str
+    action: str
+    description: Optional[str] = None
+    automation_level: str = "manual"
+    requires_approval: bool = False
+    priority: str = "low"
+    executed: bool = False
+    executed_at: Optional[Any] = None
+
+    model_config = {"from_attributes": True}
+
+
 class AlertResponse(BaseModel):
     """Alert record with its recommended actions joined."""
 
@@ -39,8 +52,12 @@ class AlertResponse(BaseModel):
     indicators: list = []
     explanation: Optional[str] = None
     mitre: list = []
-    recommended_actions: list = []
+    recommended_actions: list[RecommendedActionResponse] = []
     target_user: Optional[str] = None
     target_service: Optional[str] = None
     source_ip: Optional[str] = None
-    created_at: Optional[str] = None
+    created_at: Optional[Any] = None
+
+    model_config = {"from_attributes": True}
+
+

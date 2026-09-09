@@ -1,21 +1,17 @@
 """CYBERGUARD API entrypoint.
 
-Part 1: backend foundation (health, auth, db introspection).
-Part 2: multi-source ingestion and Supabase Storage integration.
-Part 3: AI detection (phishing & URL), risk scoring, OpenRouter XAI, alerts.
-Part 4: impersonation, account takeover, and network/API threat detection.
-Part 5: deepfake & manipulated media forensics.
-Part 6: incidents, response execution, alert management, dashboard,
-        audit logging, and the SOC assistant.
+Refactored with:
+- Async SQLAlchemy database engine and session management.
+- Multi-tenancy: Single-User personal workspaces & Organization-based RBAC.
+- Unified error handlers for database and validation errors.
+- Async endpoints across all modules.
 """
 
 import logging
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.api import (
     routes_alerts,
@@ -28,18 +24,36 @@ from app.api import (
     routes_events,
     routes_health,
     routes_incidents,
+    routes_organizations,
     routes_response,
 )
+from app.ai.key_rotator import get_key_rotator
 from app.core.config import get_settings
+from app.core.errors import register_error_handlers
+from app.db.session import init_db
 
 logger = logging.getLogger("cyberguard")
 logging.basicConfig(level=logging.INFO)
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Application lifespan: initialize database schema, seed data, and start background workers."""
+    logger.info("Starting CYBERGUARD backend...")
+    await init_db()
+    rotator = get_key_rotator()
+    rotator.start_background_task()
+    yield
+    logger.info("Shutting down CYBERGUARD backend...")
+    rotator.stop_background_task()
+
+
 app = FastAPI(
     title=settings.APP_TITLE,
     version=settings.APP_VERSION,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -50,8 +64,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Register API routers under /api/v1
 app.include_router(routes_health.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_auth.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_organizations.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_db.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_events.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_analysis.router, prefix=settings.API_V1_PREFIX)
@@ -62,25 +78,5 @@ app.include_router(routes_dashboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_audit.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_assistant.router, prefix=settings.API_V1_PREFIX)
 
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """Return 400 (not FastAPI's default 422) for invalid request payloads."""
-    return JSONResponse(
-        status_code=400,
-        content={
-            "error": "invalid_payload",
-            "message": "Request payload failed validation.",
-            "details": jsonable_encoder(exc.errors()),
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Convert unhandled errors into a JSON 500 response without leaking internals."""
-    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={"error": "internal_server_error", "message": "An unexpected error occurred."},
-    )
+# Register unified exception handlers
+register_error_handlers(app)

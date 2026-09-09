@@ -10,12 +10,40 @@ export type ThreatModule =
 export type IncidentStatus = 'open' | 'investigating' | 'contained' | 'closed';
 export type EventStatus = 'received' | 'analyzing' | 'completed' | 'failed';
 
+export type OrganizationRole = 'admin' | 'analyst' | 'viewer';
+
 export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'analyst' | 'viewer';
+  role: OrganizationRole;
   avatar?: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  is_personal: boolean;
+  role: OrganizationRole;
+  owner_id?: string;
+  created_at?: string;
+}
+
+export interface UserContext {
+  id: string;
+  email: string;
+  full_name: string;
+  is_single_user: boolean;
+  active_role: OrganizationRole;
+  active_organization: {
+    id: string;
+    name: string;
+    is_personal: boolean;
+    role: OrganizationRole;
+  };
+  personal_organization_id: string | null;
+  organizations: Organization[];
 }
 
 export interface Indicator {

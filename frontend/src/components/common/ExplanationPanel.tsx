@@ -6,7 +6,7 @@ interface Props {
 }
 
 const KEY_PHRASES = [
-  'Critical Risk', 'High Risk', 'Medium Risk', 'Low Risk',
+  'Critical Risk', 'High Risk', 'Medium Risk', 'Low Risk', 'Safe', 'Benign',
   'impossible travel', 'character substitution', 'credential harvesting',
   'data exfiltration', 'beaconing', 'password spraying', 'synthetic',
   'impersonation', 'brute force', 'credential stuffing', 'DNS tunneling',
@@ -45,7 +45,9 @@ export default function ExplanationPanel({ explanation, confidence }: Props) {
       <div className="flex items-center gap-2">
         <BrainCircuit className="h-4.5 w-4.5 text-cyan-400" style={{ width: 18, height: 18 }} />
         <h3 className="text-sm font-semibold text-slate-100">AI Explanation</h3>
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-slate-500">Simulated XAI output</span>
+        <span className="ml-auto rounded bg-cyan-500/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-cyan-400 border border-cyan-500/30">
+          Explainable AI
+        </span>
       </div>
       <p className="mt-3 text-[13px] leading-relaxed text-slate-300">{highlight(explanation)}</p>
       <div className="mt-4">

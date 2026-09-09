@@ -1,6 +1,6 @@
 """Pydantic schemas for incident management endpoints (Part 6)."""
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -44,5 +44,8 @@ class IncidentResponse(BaseModel):
     assigned_to: Optional[str] = None
     linked_alert_ids: list = []
     timeline: list = []
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
+
+    model_config = {"from_attributes": True}
+
