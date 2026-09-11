@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    routes_actions,
     routes_alerts,
     routes_analysis,
     routes_assistant,
@@ -24,7 +25,9 @@ from app.api import (
     routes_events,
     routes_health,
     routes_incidents,
+    routes_integrations,
     routes_organizations,
+    routes_policies,
     routes_response,
 )
 from app.ai.key_rotator import get_key_rotator
@@ -73,7 +76,10 @@ app.include_router(routes_db.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_events.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_analysis.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_alerts.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_actions.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_policies.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_incidents.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_integrations.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_response.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_dashboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_audit.router, prefix=settings.API_V1_PREFIX)

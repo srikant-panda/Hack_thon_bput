@@ -76,6 +76,12 @@ class Organization(Base):
     executions: Mapped[list["ResponseExecution"]] = relationship(
         "ResponseExecution", back_populates="organization", cascade="all, delete-orphan"
     )
+    enforcement_policies: Mapped[list["EnforcementPolicy"]] = relationship(
+        "EnforcementPolicy", back_populates="organization", cascade="all, delete-orphan"
+    )
+    action_executions: Mapped[list["ActionExecution"]] = relationship(
+        "ActionExecution", back_populates="organization", cascade="all, delete-orphan"
+    )
     audit_logs: Mapped[list["AuditLog"]] = relationship(
         "AuditLog", back_populates="organization", cascade="all, delete-orphan"
     )
@@ -172,6 +178,9 @@ class Alert(Base):
     event: Mapped[Optional["Event"]] = relationship("Event", back_populates="alerts")
     recommended_actions: Mapped[list["RecommendedAction"]] = relationship(
         "RecommendedAction", back_populates="alert", cascade="all, delete-orphan", lazy="selectin"
+    )
+    action_executions: Mapped[list["ActionExecution"]] = relationship(
+        "ActionExecution", back_populates="alert", cascade="all, delete-orphan"
     )
     incident_links: Mapped[list["IncidentAlert"]] = relationship(
         "IncidentAlert", back_populates="alert", cascade="all, delete-orphan"
@@ -303,3 +312,118 @@ class AuditLog(Base):
 
     # Relationships
     organization: Mapped[Optional["Organization"]] = relationship("Organization", back_populates="audit_logs")
+
+
+class EnforcementPolicy(Base):
+    __tablename__ = "enforcement_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)  # e.g. "Strict", "Balanced", "Permissive"
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    # --- Per-threat-type risk thresholds (0-100), independent of display severity ---
+    # phishing (also reused for URLs)
+    phishing_high_threshold: Mapped[int] = mapped_column(Integer, default=75)
+    phishing_medium_threshold: Mapped[int] = mapped_column(Integer, default=40)
+    # deepfake / media
+    deepfake_high_threshold: Mapped[int] = mapped_column(Integer, default=70)
+    deepfake_medium_threshold: Mapped[int] = mapped_column(Integer, default=50)
+    # account takeover
+    ato_high_threshold: Mapped[int] = mapped_column(Integer, default=60)
+    ato_medium_threshold: Mapped[int] = mapped_column(Integer, default=40)
+    # network / api abuse
+    network_high_threshold: Mapped[int] = mapped_column(Integer, default=70)
+    network_medium_threshold: Mapped[int] = mapped_column(Integer, default=50)
+    # impersonation / BEC
+    impersonation_high_threshold: Mapped[int] = mapped_column(Integer, default=70)
+    impersonation_medium_threshold: Mapped[int] = mapped_column(Integer, default=40)
+
+    # --- Action per enforcement severity band ---
+    action_on_critical: Mapped[str] = mapped_column(String(64), default="block_and_quarantine")
+    action_on_high: Mapped[str] = mapped_column(String(64), default="block")
+    action_on_medium: Mapped[str] = mapped_column(String(64), default="warn_and_log")
+    action_on_low: Mapped[str] = mapped_column(String(64), default="allow")
+
+    # --- Auto-execute toggles ---
+    auto_execute_critical: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_execute_high: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_execute_medium: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_execute_low: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # --- Notifications ---
+    notify_soc_on_critical: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_soc_on_high: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_user_on_medium: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    # Relationships
+    organization: Mapped["Organization"] = relationship(
+        "Organization", back_populates="enforcement_policies", foreign_keys=[organization_id]
+    )
+
+
+class ActionExecution(Base):
+    __tablename__ = "action_executions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    alert_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    event_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("events.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+
+    # What to do
+    # values: quarantine_email | block_url | drop_packet | block_ip | revoke_session |
+    #         require_mfa | rate_limit | tag_and_warn | allow | flag_for_review
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # e.g. {"email_id": "...", "recipient": "..."} or {"url": "..."} or {"ip": "..."}
+    target: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+
+    # Lifecycle: pending | approved | executing | success | failed | rejected | skipped | released | unblocked
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    execution_mode: Mapped[str] = mapped_column(String(16), nullable=False)  # "client" | "server"
+
+    # Origin: user | api | automated_system | webhook
+    triggered_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    triggered_by_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # Approval workflow
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Execution result, e.g. {"quarantine_id": "q_abc", "simulated": true}
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    execution_result: Mapped[Optional[dict[str, Any]]] = mapped_column(PortableJSON, nullable=True)
+
+    # Risk context (denormalized for fast queries)
+    risk_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False)  # critical|high|medium|low
+    threat_type: Mapped[str] = mapped_column(String(64), nullable=False)  # phishing|deepfake|ato|network|impersonation
+    module: Mapped[str] = mapped_column(String(64), nullable=False)  # mirrors Alert.module
+
+    # Policy reference
+    policy_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("enforcement_policies.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    # Relationships
+    organization: Mapped[Optional["Organization"]] = relationship("Organization", back_populates="action_executions")
+    alert: Mapped[Optional["Alert"]] = relationship("Alert", back_populates="action_executions")
+    event: Mapped[Optional["Event"]] = relationship("Event")
+    policy: Mapped[Optional["EnforcementPolicy"]] = relationship("EnforcementPolicy")

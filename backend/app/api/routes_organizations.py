@@ -94,6 +94,17 @@ async def create_organization(
     user_db = user_query.scalar_one()
     user_db.active_organization_id = org.id
 
+    # Seed the default enforcement policy so server-mode integrations can
+    # resolve a policy for this org immediately.
+    from app.db.models import EnforcementPolicy
+
+    db.add(EnforcementPolicy(
+        organization_id=org.id,
+        name="Balanced (default)",
+        description="Auto-block critical/high, require approval for medium.",
+        is_active=True,
+    ))
+
     await db.commit()
 
     return OrganizationResponse(

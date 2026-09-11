@@ -121,6 +121,38 @@ DEFAULT_RESPONSE_CATALOG = [
 ]
 
 
+async def _seed_default_policies() -> None:
+    """Create one default "Balanced" enforcement policy per organization if none exists."""
+    from app.db.models import EnforcementPolicy, Organization
+
+    async with async_session_maker() as session:
+        result = await session.execute(select(Organization))
+        orgs = result.scalars().all()
+
+        seeded = 0
+        for org in orgs:
+            existing = await session.execute(
+                select(EnforcementPolicy).where(
+                    EnforcementPolicy.organization_id == org.id,
+                    EnforcementPolicy.is_active == True,  # noqa: E712 - SQLAlchemy comparison
+                )
+            )
+            if existing.scalars().first() is not None:
+                continue
+
+            session.add(EnforcementPolicy(
+                organization_id=org.id,
+                name="Balanced (default)",
+                description="Auto-block critical/high, require approval for medium.",
+                is_active=True,
+            ))
+            seeded += 1
+
+        if seeded:
+            logger.info("Seeded default enforcement policies for %d organization(s)...", seeded)
+            await session.commit()
+
+
 async def init_db() -> None:
     """Initialize database tables and seed default records if needed."""
     from app.db.models import ResponseCatalog
@@ -137,3 +169,6 @@ async def init_db() -> None:
             for item in DEFAULT_RESPONSE_CATALOG:
                 session.add(ResponseCatalog(**item))
             await session.commit()
+
+    # Seed one default enforcement policy per organization (no-op when no orgs exist yet)
+    await _seed_default_policies()

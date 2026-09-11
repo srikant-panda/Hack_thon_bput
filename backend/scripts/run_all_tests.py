@@ -308,6 +308,31 @@ async def run_tests():
     # Clean up overrides
     app.dependency_overrides.clear()
 
+    # -----------------------------------------------------------------------
+    # 5. Phase 1 — Dual-Mode Foundation (policies, mode detection, enforcement engine)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 5] Phase 1 — Dual-Mode Foundation")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_phase1 import run_phase1_tests
+
+    await run_phase1_tests(runner)
+
+    # -----------------------------------------------------------------------
+    # 6. Phase 2 — Server-Mode Integration Endpoints (enforcement executor)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 6] Phase 2 — Server-Mode Integration Endpoints")
+    from test_phase2 import run_phase2_tests
+
+    await run_phase2_tests(runner)
+
+    # -----------------------------------------------------------------------
+    # 7. Phase 3 — Approval Workflow & Policy Management
+    # -----------------------------------------------------------------------
+    print("\n[Suite 7] Phase 3 — Approval Workflow & Policy Management")
+    from test_phase3 import run_phase3_tests
+
+    await run_phase3_tests(runner)
+
     return runner.report()
 
 

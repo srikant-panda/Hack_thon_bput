@@ -164,6 +164,65 @@ create table audit_logs (
     created_at timestamptz not null default now()
 );
 
+-- Dual-mode enforcement: org-owned policies (thresholds are independent of display severity)
+create table enforcement_policies (
+    id uuid primary key default gen_random_uuid(),
+    organization_id uuid not null references organizations (id) on delete cascade,
+    name varchar(120) not null,
+    description text,
+    is_active boolean not null default true,
+    phishing_high_threshold integer not null default 75,
+    phishing_medium_threshold integer not null default 40,
+    deepfake_high_threshold integer not null default 70,
+    deepfake_medium_threshold integer not null default 50,
+    ato_high_threshold integer not null default 60,
+    ato_medium_threshold integer not null default 40,
+    network_high_threshold integer not null default 70,
+    network_medium_threshold integer not null default 50,
+    impersonation_high_threshold integer not null default 70,
+    impersonation_medium_threshold integer not null default 40,
+    action_on_critical varchar(64) not null default 'block_and_quarantine',
+    action_on_high varchar(64) not null default 'block',
+    action_on_medium varchar(64) not null default 'warn_and_log',
+    action_on_low varchar(64) not null default 'allow',
+    auto_execute_critical boolean not null default true,
+    auto_execute_high boolean not null default true,
+    auto_execute_medium boolean not null default false,
+    auto_execute_low boolean not null default false,
+    notify_soc_on_critical boolean not null default true,
+    notify_soc_on_high boolean not null default true,
+    notify_user_on_medium boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+-- Dual-mode enforcement: executed (or pending) enforcement actions with approval workflow
+create table action_executions (
+    id uuid primary key default gen_random_uuid(),
+    organization_id uuid references organizations (id) on delete cascade,
+    alert_id uuid references alerts (id) on delete set null,
+    event_id uuid references events (id) on delete set null,
+    action_type varchar(64) not null,
+    target jsonb not null default '{}'::jsonb,
+    status varchar(32) not null default 'pending',
+    execution_mode varchar(16) not null,
+    triggered_by varchar(64) not null,
+    triggered_by_id varchar(64),
+    requires_approval boolean not null default false,
+    approved_by varchar(64),
+    approved_at timestamptz,
+    rejection_reason text,
+    executed_at timestamptz,
+    execution_result jsonb,
+    risk_score integer not null,
+    severity varchar(32) not null,
+    threat_type varchar(64) not null,
+    module varchar(64) not null,
+    policy_id uuid references enforcement_policies (id) on delete set null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
 -- ---------------------------------------------------------------------------
 -- Indexes
 -- ---------------------------------------------------------------------------
@@ -173,6 +232,9 @@ create index idx_alerts_created_at on alerts (created_at);
 create index idx_events_status on events (status);
 create index idx_audit_logs_created_at on audit_logs (created_at);
 create index idx_incident_alerts_alert_id on incident_alerts (alert_id);
+create index idx_enforcement_policies_org on enforcement_policies (organization_id);
+create index idx_action_executions_status on action_executions (status);
+create index idx_action_executions_created_at on action_executions (created_at);
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security
@@ -191,6 +253,8 @@ alter table incident_events enable row level security;
 alter table response_catalog enable row level security;
 alter table response_executions enable row level security;
 alter table audit_logs enable row level security;
+alter table enforcement_policies enable row level security;
+alter table action_executions enable row level security;
 
 -- profiles: owning user can read and update their own profile
 create policy "profiles_select_own" on profiles
