@@ -188,6 +188,13 @@ async def run_phase3_tests(runner: TestRunner) -> None:
         org_id=org_id, alert_id=alert_id, action_type="block", status="skipped",
     )
     # A second org's record — must never leak into listings
+    # (create the org row first: Postgres enforces the FK, SQLite did not)
+    async with async_session_maker() as db:
+        db.add(Organization(
+            id=f"org-other-{suffix}", name="Other Org", slug=f"other-{suffix}",
+            is_personal=False, owner_id=user_id,
+        ))
+        await db.commit()
     other_exec = await _make_execution(
         org_id=f"org-other-{suffix}", alert_id=None, action_type="quarantine_email", status="success",
     )

@@ -45,6 +45,9 @@ class TestRunner:
             self.failed += 1
             print(f"  \033[31m✖ FAIL\033[0m: {name} - {details}")
 
+    def skip(self, name: str, reason: str = ""):
+        print(f"  \033[33m⊘ SKIP\033[0m: {name} ({reason})")
+
     def report(self):
         total = self.passed + self.failed
         print("\n" + "=" * 60)
@@ -85,7 +88,7 @@ async def run_tests():
     test_user_id = f"test-usr-{os.urandom(4).hex()}"
     test_email = f"analyst-{test_user_id}@cyberguard.test"
     test_user = CurrentUser(id=test_user_id, email=test_email, full_name="Test SOC Analyst")
-    personal_org_id = f"org-personal-{test_user.id}"
+    personal_org_id = f"org-personal-{os.urandom(8).hex()}"  # <= varchar(36) — Postgres enforces the column length
 
     # Provision user and personal org in a dedicated, isolated session
     async with async_session_maker() as db:
@@ -102,7 +105,7 @@ async def run_tests():
         db.add(personal_org)
         await db.flush()
         member = OrganizationMember(
-            id=f"mem-{test_user.id}-{personal_org.id}",
+            id=f"mem-{os.urandom(12).hex()}",  # <= varchar(36)
             organization_id=personal_org.id,
             user_id=test_user.id,
             role="admin",
@@ -352,42 +355,50 @@ async def run_tests():
     await run_assistant_tests(runner)
 
     # -----------------------------------------------------------------------
-    # 9. Phase -1 — User-Only Account Foundation (usernames, frozen orgs,
-    #    owner-scoped tenancy)
+    # 9. ML Integration Gates (blend contract, v2 models, audio LCNN)
     # -----------------------------------------------------------------------
-    print("\n[Suite 9] Phase -1 — User Foundation (usernames, frozen orgs, owner scoping)")
+    print("\n[Suite 9] ML Integration Gates")
+    from test_ml_gates import run_ml_gate_tests
+
+    run_ml_gate_tests(runner)
+
+    # -----------------------------------------------------------------------
+    # 10. Phase -1 — User-Only Account Foundation (usernames, frozen orgs,
+    #     owner-scoped tenancy)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 10] Phase -1 — User Foundation (usernames, frozen orgs, owner scoping)")
     from test_user_foundation import run_user_foundation_tests
 
     await run_user_foundation_tests(runner)
 
     # -----------------------------------------------------------------------
-    # 10. Phase -1 — Row-Level Security (PostgreSQL only; skips on SQLite)
+    # 11. Phase -1 — Row-Level Security (PostgreSQL only; skips on SQLite)
     # -----------------------------------------------------------------------
-    print("\n[Suite 10] Phase -1 — Row-Level Security (PostgreSQL only)")
+    print("\n[Suite 11] Phase -1 — Row-Level Security (PostgreSQL only)")
     from test_rls_pg import run_rls_tests
 
     await run_rls_tests(runner)
 
     # -----------------------------------------------------------------------
-    # 11. Phase 1-2 — Gmail Connector, OAuth Flow & Encrypted Token Vault
+    # 12. Phase 1-2 — Gmail Connector, OAuth Flow & Encrypted Token Vault
     # -----------------------------------------------------------------------
-    print("\n[Suite 11] Phase 1-2 — Email Connectors (Gmail OAuth + token vault)")
+    print("\n[Suite 12] Phase 1-2 — Email Connectors (Gmail OAuth + token vault)")
     from test_email_connectors import run_email_connector_tests
 
     await run_email_connector_tests(runner)
 
     # -----------------------------------------------------------------------
-    # 12. Phase 3 — Mailbox Scanning, Normalization & Verbose Results
+    # 13. Phase 3 — Mailbox Scanning, Normalization & Verbose Results
     # -----------------------------------------------------------------------
-    print("\n[Suite 12] Phase 3 — Mailbox Scanning & Verbose Analysis")
+    print("\n[Suite 13] Phase 3 — Mailbox Scanning & Verbose Analysis")
     from test_mail_scanner import run_mail_scanner_tests
 
     await run_mail_scanner_tests(runner)
 
     # -----------------------------------------------------------------------
-    # 13. Phase 4 — Enforcement, Quarantine, Sender Rules & Expiry Scheduler
+    # 14. Phase 4 — Enforcement, Quarantine, Sender Rules & Expiry Scheduler
     # -----------------------------------------------------------------------
-    print("\n[Suite 13] Phase 4 — Enforcement (quarantine, sender rules, expiry)")
+    print("\n[Suite 14] Phase 4 — Enforcement (quarantine, sender rules, expiry)")
     from test_enforcement import run_enforcement_tests
 
     await run_enforcement_tests(runner)

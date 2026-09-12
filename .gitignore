@@ -80,3 +80,6 @@ desktop.ini
 # ---- Logs ----
 *.log
 logs/
+
+# Media storage fallback (runtime artifacts)
+backend/storage/
