@@ -457,3 +457,39 @@ export interface MessageAnalysis {
   scan: ScanResult;
   message: NormalizedMessage;
 }
+
+// --- Enforcement (Phase 4) ---
+
+export interface ConnectorSettings {
+  connector_id: string;
+  quarantine_expiry_hours: number | null;
+  permanent_delete_enabled: boolean;
+  auto_quarantine_enabled: boolean;
+  updated_at: string | null;
+}
+
+export interface QuarantinedItem {
+  id: string;
+  connector_id: string;
+  provider_message_id: string;
+  sender_email: string;
+  reason: string;
+  severity: string;
+  scan_result: ScanResult;
+  quarantined_at: string | null;
+  expires_at: string | null;
+  status: string;
+  last_error: string | null;
+}
+
+export interface BlockedSender {
+  id: string;
+  connector_id: string;
+  sender_email: string;
+  provider_rule_id: string | null;
+  reason: string;
+  blocked_at: string | null;
+  expires_at: string | null;
+  status: string;
+  last_error: string | null;
+}

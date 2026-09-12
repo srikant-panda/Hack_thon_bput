@@ -25,7 +25,10 @@ import type {
   ConnectorOperationLog,
   MailMessageSummary,
   ScanResult,
-  MessageAnalysis,} from '../types';
+  MessageAnalysis,
+  ConnectorSettings,
+  QuarantinedItem,
+  BlockedSender,} from '../types';
 import * as mockApi from './mockApi';
 import { db, addAuditLog } from './mockData';
 import { ApiError, apiFetch } from './http';
@@ -662,6 +665,72 @@ export async function getMessageAnalysis(
     throw new Error('DEMO MODE — mailbox scanning requires a real connected mailbox');
   }
   return (await apiFetch(`/connectors/${connectorId}/messages/${messageId}/analysis`)) as MessageAnalysis;
+}
+
+
+// --- Enforcement (Phase 4) — real provider-backed actions ---
+
+export async function getConnectorSettings(connectorId: string): Promise<ConnectorSettings> {
+  if (USE_MOCK) {
+    return {
+      connector_id: connectorId,
+      quarantine_expiry_hours: 24,
+      permanent_delete_enabled: false,
+      auto_quarantine_enabled: true,
+      updated_at: null,
+    };
+  }
+  return (await apiFetch(`/connectors/${connectorId}/settings`)) as ConnectorSettings;
+}
+
+export async function updateConnectorSettings(
+  connectorId: string,
+  patch: {
+    quarantine_expiry_hours?: number | null;
+    expiry_mode?: 'hours' | 'manual';
+    permanent_delete_enabled?: boolean;
+    auto_quarantine_enabled?: boolean;
+  },
+): Promise<ConnectorSettings> {
+  if (USE_MOCK) {
+    return getConnectorSettings(connectorId);
+  }
+  return (await apiFetch(`/connectors/${connectorId}/settings`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })) as ConnectorSettings;
+}
+
+export async function listQuarantined(): Promise<QuarantinedItem[]> {
+  if (USE_MOCK) return []; // Demo mode: no real mailbox actions exist.
+  const res = await apiFetch('/enforcement/quarantine');
+  return res.items as QuarantinedItem[];
+}
+
+export async function releaseQuarantined(itemId: string): Promise<string> {
+  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
+  const res = await apiFetch(`/enforcement/quarantine/${itemId}/release`, { method: 'POST' });
+  return res.status as string;
+}
+
+export async function deleteQuarantined(itemId: string): Promise<{ status: string; message?: string }> {
+  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
+  return (await apiFetch(`/enforcement/quarantine/${itemId}/delete`, { method: 'POST' })) as {
+    status: string;
+    message?: string;
+  };
+}
+
+export async function listBlockedSenders(): Promise<BlockedSender[]> {
+  if (USE_MOCK) return [];
+  const res = await apiFetch('/enforcement/blocked-senders');
+  return res.items as BlockedSender[];
+}
+
+export async function unblockSender(blockId: string): Promise<string> {
+  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
+  const res = await apiFetch(`/enforcement/blocked-senders/${blockId}/release`, { method: 'POST' });
+  return res.status as string;
 }
 
 export function isMockMode(): boolean {

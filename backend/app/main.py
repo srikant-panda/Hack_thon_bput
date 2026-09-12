@@ -22,7 +22,9 @@ from app.api import (
     routes_auth,
     routes_dashboard,
     routes_connectors,
+    routes_enforcement,
     routes_db,
+    routes_settings,
     routes_events,
     routes_health,
     routes_incidents,
@@ -50,9 +52,15 @@ async def lifespan(_app: FastAPI):
     rotator = get_key_rotator()
     rotator.log_startup_summary()
     rotator.start_background_task()
+    from app.services.scheduler import start_scheduler
+
+    start_scheduler()
     yield
     logger.info("Shutting down CYBERGUARD backend...")
     rotator.stop_background_task()
+    from app.services.scheduler import stop_scheduler
+
+    stop_scheduler()
 
 
 app = FastAPI(
@@ -86,6 +94,8 @@ app.include_router(routes_dashboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_audit.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_assistant.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_connectors.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_settings.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_enforcement.router, prefix=settings.API_V1_PREFIX)
 
 # Register unified exception handlers
 register_error_handlers(app)

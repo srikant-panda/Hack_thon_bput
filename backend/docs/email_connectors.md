@@ -7,10 +7,13 @@ never faked.**
 
 ## Phase boundary
 
-- **Phase 1-2 (this phase):** connect Gmail, validate mailbox access
-  (`test_connection`), encrypted token vault, operation log.
-- **Phase 3:** scan mailbox messages.
-- **Phase 4:** quarantine / block senders.
+- **Phase 1-2:** connect Gmail, validate mailbox access, encrypted token
+  vault, operation log. ✅
+- **Phase 3:** scan mailbox messages (analysis only). ✅
+- **Phase 4:** quarantine / block senders — ✅ real Gmail label + filter
+  writes, user-configurable expiry (3h/24h/custom/manual), permanent-delete
+  toggle, manual release/delete overrides, and a 5-minute expiry scheduler
+  that auto-releases expired quarantines and removes expired sender filters.
 - **Event email notifications: Phase 7 — not implemented yet.**
 
 ## Security model

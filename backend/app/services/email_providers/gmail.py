@@ -28,6 +28,9 @@ GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+# Sender rules (Gmail filters) need the settings scope; without re-consent
+# Google answers 403 which maps to insufficient_scope.
+GMAIL_SETTINGS_SCOPE = "https://www.googleapis.com/auth/gmail.settings.basic"
 
 _TIMEOUT = httpx.Timeout(15.0)
 
@@ -245,6 +248,79 @@ class GmailProvider:
             received_at=received_at,
             is_read=is_read,
         )
+
+    # ------------------------------------------------------------------
+    # Phase 4 — provider-backed enforcement
+    # ------------------------------------------------------------------
+
+    QUARANTINE_LABEL_NAME = "CYBERGUARD-Quarantine"
+
+    async def ensure_quarantine_label(self, access_token: str) -> str:
+        """Find or create the CYBERGUARD-Quarantine label; return its id."""
+        labels = await self._request("GET", f"{GMAIL_API_BASE}/users/me/labels", access_token)
+        for label in labels.get("labels", []):
+            if label.get("name") == self.QUARANTINE_LABEL_NAME:
+                return str(label["id"])
+        created = await self._request(
+            "POST",
+            f"{GMAIL_API_BASE}/users/me/labels",
+            access_token,
+            json={
+                "name": self.QUARANTINE_LABEL_NAME,
+                "labelListVisibility": "labelShow",
+                "messageListVisibility": "show",
+            },
+        )
+        return str(created["id"])
+
+    async def quarantine_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict:
+        """Archive the message out of INBOX into the quarantine label."""
+        return await self._request(
+            "POST",
+            f"{GMAIL_API_BASE}/users/me/messages/{message_id}/modify",
+            access_token,
+            json={"addLabelIds": [quarantine_label], "removeLabelIds": ["INBOX"]},
+        )
+
+    async def release_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict:
+        """Return a quarantined message to the inbox."""
+        return await self._request(
+            "POST",
+            f"{GMAIL_API_BASE}/users/me/messages/{message_id}/modify",
+            access_token,
+            json={"addLabelIds": ["INBOX"], "removeLabelIds": [quarantine_label]},
+        )
+
+    async def delete_message(self, access_token: str, message_id: str, permanent: bool) -> dict:
+        """Trash the message, or permanently delete when permitted+enabled."""
+        if permanent:
+            await self._request("DELETE", f"{GMAIL_API_BASE}/users/me/messages/{message_id}", access_token)
+            return {"deleted": True, "permanent": True}
+        return await self._request(
+            "POST", f"{GMAIL_API_BASE}/users/me/messages/{message_id}/trash", access_token
+        )
+
+    async def create_sender_rule(self, access_token: str, sender_email: str, target_label: str) -> dict:
+        """Create a Gmail filter auto-quarantining future mail from the sender.
+
+        Requires https://www.googleapis.com/auth/gmail.settings.basic; without
+        the granted scope Google answers 403 which maps to insufficient_scope.
+        """
+        return await self._request(
+            "POST",
+            f"{GMAIL_API_BASE}/users/me/settings/filters",
+            access_token,
+            json={
+                "criteria": {"from": sender_email},
+                "action": {"addLabelIds": [target_label], "removeLabelIds": ["INBOX"]},
+            },
+        )
+
+    async def delete_sender_rule(self, access_token: str, rule_id: str) -> dict:
+        await self._request(
+            "DELETE", f"{GMAIL_API_BASE}/users/me/settings/filters/{rule_id}", access_token
+        )
+        return {"deleted": True, "rule_id": rule_id}
 
     async def close(self) -> None:
         await self._client.aclose()

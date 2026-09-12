@@ -40,6 +40,8 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
   { to: '/incidents', label: 'Incidents', icon: ShieldAlert },
   { to: '/response-actions', label: 'Response Actions', icon: Zap },
   { to: '/email-connectors', label: 'Email Connectors', icon: Mail },
+  { to: '/quarantine', label: 'Quarantine Queue', icon: PackageOpen },
+  { to: '/blocked-senders', label: 'Blocked Senders', icon: Ban },
   { to: '/organization', label: 'Organization & Team', icon: Building2 },
   { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText },
   { to: '/reports', label: 'Reports', icon: FileBarChart },
@@ -48,7 +50,6 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
 
 const ORG_NAV_ITEMS: { to: string; label: string; icon: typeof Bell; adminOnly?: boolean }[] = [
   { to: '/approvals', label: 'Approval Queue', icon: ClipboardCheck },
-  { to: '/quarantine', label: 'Quarantine Queue', icon: PackageOpen },
   { to: '/blocklist', label: 'Block List', icon: Ban },
   { to: '/action-log', label: 'Action Log', icon: ScrollText },
   { to: '/policies', label: 'Policy Management', icon: Settings2, adminOnly: true },

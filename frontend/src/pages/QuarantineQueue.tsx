@@ -1,200 +1,223 @@
-import { useState } from 'react';
-import { AlertTriangle, Archive, PackageOpen, RefreshCw } from 'lucide-react';
-import * as api from '../services/api';
-import { useApi } from '../hooks/useApi';
-import { useUiStore } from '../store/uiStore';
-import { useAuthStore } from '../store/authStore';
-import type { ActionExecution } from '../types';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Inbox, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
-import SeverityBadge from '../components/common/SeverityBadge';
-import StatusPill from '../components/common/StatusPill';
-import EmptyState from '../components/common/EmptyState';
-import { PanelSkeleton } from '../components/common/LoadingSkeleton';
+import VerboseResultPanel, { SEVERITY_STYLES } from '../components/common/VerboseResultPanel';
+import * as api from '../services/api';
+import type { QuarantinedItem } from '../types';
 
-function QuarantineCard({
-  exec,
-  canRelease,
-  onRelease,
-}: {
-  exec: ActionExecution;
-  canRelease: boolean;
-  onRelease: (exec: ActionExecution) => void;
-}) {
-  const t = exec.target ?? {};
-  const sender = typeof t.sender === 'string' ? t.sender : null;
-  const recipient = typeof t.recipient === 'string' ? t.recipient : null;
-  const subject = typeof t.subject === 'string' ? t.subject : null;
-  const mediaType = typeof t.media_type === 'string' ? t.media_type : null;
+const STATUS_STYLES: Record<string, string> = {
+  quarantined: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/30',
+  released: 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/30',
+  deleted: 'bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700',
+  expired: 'bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700',
+};
 
-  return (
-    <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/60 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Archive className="h-4 w-4 text-red-400" />
-          <h3 className="max-w-md truncate text-sm font-semibold text-zinc-100">
-            {subject ?? (typeof t.url === 'string' ? t.url : exec.action_type)}
-          </h3>
-        </div>
-        <div className="flex items-center gap-2">
-          <SeverityBadge severity={exec.severity} />
-          <span className="font-mono text-[11px] text-zinc-500">risk {exec.risk_score}</span>
-        </div>
-      </div>
-
-      <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-        {sender && (
-          <div className="flex gap-2">
-            <dt className="shrink-0 text-zinc-500">Sender</dt>
-            <dd className="truncate font-mono text-zinc-300">{sender}</dd>
-          </div>
-        )}
-        {recipient && (
-          <div className="flex gap-2">
-            <dt className="shrink-0 text-zinc-500">Recipient</dt>
-            <dd className="truncate font-mono text-zinc-300">{recipient}</dd>
-          </div>
-        )}
-        {mediaType && (
-          <div className="flex gap-2">
-            <dt className="shrink-0 text-zinc-500">Media</dt>
-            <dd className="font-mono text-zinc-300">{mediaType}</dd>
-          </div>
-        )}
-        <div className="flex gap-2">
-          <dt className="shrink-0 text-zinc-500">Quarantined</dt>
-          <dd className="font-mono text-zinc-400">{new Date(exec.executed_at ?? exec.created_at).toLocaleString()}</dd>
-        </div>
-      </dl>
-
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <StatusPill status={exec.status} />
-          {exec.alert_id && (
-            <span className="font-mono text-[11px] text-zinc-600">alert {exec.alert_id}</span>
-          )}
-        </div>
-        {canRelease && (
-          <ReleaseButton exec={exec} onRelease={onRelease} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ReleaseButton({ exec, onRelease }: { exec: ActionExecution; onRelease: (exec: ActionExecution) => void }) {
-  const [confirming, setConfirming] = useState(false);
-  if (!confirming) {
-    return (
-      <button
-        onClick={() => setConfirming(true)}
-        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:border-red-500/60 hover:text-red-400 transition"
-      >
-        Release
-      </button>
-    );
-  }
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="flex items-center gap-1 text-[11px] text-amber-400">
-        <AlertTriangle className="h-3 w-3" /> Deliver to recipient?
-      </span>
-      <button
-        onClick={() => onRelease(exec)}
-        className="rounded-lg bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-500 transition"
-      >
-        Confirm
-      </button>
-      <button
-        onClick={() => setConfirming(false)}
-        className="rounded-lg border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-400 hover:bg-zinc-800 transition"
-      >
-        Cancel
-      </button>
-    </div>
-  );
+function formatWhen(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
 }
 
 export default function QuarantineQueue() {
-  const addToast = useUiStore((s) => s.addToast);
-  const can = useAuthStore((s) => s.can);
-  const canRelease = can('mutate'); // analyst and above
+  const isMockMode = api.isMockMode();
+  const [items, setItems] = useState<QuarantinedItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selected, setSelected] = useState<QuarantinedItem | null>(null);
 
-  const [page, setPage] = useState(1);
-  const { data, loading, error, refetch } = useApi(
-    () => api.listQuarantine(page, 12),
-    [page]
-  );
-
-  const handleRelease = async (exec: ActionExecution) => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      await api.releaseQuarantine(exec.id);
-      addToast('Item released from quarantine', 'low');
-      refetch();
+      setItems(await api.listQuarantined());
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Release failed', 'high');
+      setError(err instanceof Error ? err.message : 'Failed to load quarantine queue');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleRelease = async (item: QuarantinedItem) => {
+    setActionId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.releaseQuarantined(item.id);
+      setNotice(`Released "${item.scan_result?.subject || item.provider_message_id}" back to the inbox.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Release failed');
+    } finally {
+      setActionId(null);
     }
   };
 
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / (data.page_size || 12))) : 1;
+  const handleDelete = async (item: QuarantinedItem) => {
+    setActionId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.deleteQuarantined(item.id);
+      setNotice(res.message ?? 'Message deleted.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const activeItems = items.filter((i) => i.status === 'quarantined');
+  const pastItems = items.filter((i) => i.status !== 'quarantined');
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
         title="Quarantine Queue"
-        description="Items held out of user reach by enforcement actions. Releasing delivers the item back to its recipient."
-        actions={
-          <button
-            onClick={refetch}
-            className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 transition"
-          >
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
-          </button>
-        }
+        description="Messages quarantined at Gmail by auto-enforcement. Release returns them to the inbox; delete trashes or permanently removes them per your connector settings."
       />
 
-      {loading ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <PanelSkeleton key={i} height="h-36" />
-          ))}
+      {isMockMode && (
+        <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
+          <AlertTriangle className="h-4 w-4 text-amber-400" />
+          <span className="font-mono font-bold tracking-wider">DEMO MODE — enforcement actions are simulated/unavailable</span>
         </div>
-      ) : error ? (
-        <EmptyState icon={PackageOpen} title="Failed to load quarantine queue" description={error} />
-      ) : !data || data.items.length === 0 ? (
-        <EmptyState
-          icon={PackageOpen}
-          title="Quarantine is empty"
-          description="No items are currently held by enforcement actions."
-        />
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2">
-            {data.items.map((exec) => (
-              <QuarantineCard key={exec.id} exec={exec} canRelease={canRelease} onRelease={handleRelease} />
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">
+          <AlertTriangle className="h-4 w-4 text-red-400" />
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-300">
+          <Inbox className="h-4 w-4 text-emerald-400" />
+          {notice}
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-sm backdrop-blur">
+        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+          <h2 className="text-sm font-semibold text-zinc-100">
+            Quarantined messages{' '}
+            <span className="font-mono text-xs text-zinc-500">({activeItems.length} active)</span>
+          </h2>
+          <button
+            type="button"
+            onClick={load}
+            className="flex items-center gap-1.5 text-xs text-zinc-400 transition hover:text-red-400"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 px-5 py-10 text-sm text-zinc-500">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading quarantine queue…
+          </div>
+        ) : items.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-zinc-500">
+            Nothing quarantined yet. Run a mailbox scan from Email Connectors — high and critical
+            verdicts are quarantined automatically when auto-enforcement is on.
+          </div>
+        ) : (
+          <div className="divide-y divide-zinc-800">
+            {[...activeItems, ...pastItems].map((item) => (
+              <div key={item.id} className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${
+                        SEVERITY_STYLES[item.severity] ?? SEVERITY_STYLES.safe
+                      }`}
+                    >
+                      {item.severity}
+                    </span>
+                    <span className="truncate text-sm font-semibold text-zinc-100">
+                      {item.scan_result?.subject || '(no subject)'}
+                    </span>
+                    <span className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${STATUS_STYLES[item.status] ?? STATUS_STYLES.deleted}`}>
+                      {item.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                    From {item.sender_email} · quarantined {formatWhen(item.quarantined_at)} · expires{' '}
+                    {item.expires_at ? formatWhen(item.expires_at) : 'manual'}
+                  </p>
+                  {item.last_error && <p className="mt-1 text-xs text-red-400">Last error: {item.last_error}</p>}
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelected(item)}
+                    className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-800/60"
+                  >
+                    Why?
+                  </button>
+                  {item.status === 'quarantined' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleRelease(item)}
+                        disabled={actionId === item.id || isMockMode}
+                        className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-50"
+                      >
+                        {actionId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Inbox className="h-3.5 w-3.5" />}
+                        Release to Inbox
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(item)}
+                        disabled={actionId === item.id || isMockMode}
+                        className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        {actionId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        Delete Permanently
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-3 text-xs text-zinc-400">
+        )}
+      </div>
+
+      {/* Why-drawer with the full verbose analysis */}
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/70 backdrop-blur-sm" onClick={() => setSelected(null)}>
+          <div
+            className="h-full w-full max-w-3xl overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-zinc-100">{selected.scan_result?.subject || '(no subject)'}</h3>
+                <p className="mt-0.5 font-mono text-xs text-zinc-500">From {selected.sender_email}</p>
+              </div>
               <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800 disabled:opacity-40 transition"
+                type="button"
+                onClick={() => setSelected(null)}
+                className="rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 transition hover:text-red-400"
               >
-                Previous
-              </button>
-              <span className="font-mono">
-                page {data?.page ?? page} / {totalPages} · {data?.total ?? 0} items
-              </span>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800 disabled:opacity-40 transition"
-              >
-                Next
+                <X className="h-4 w-4" />
               </button>
             </div>
-          )}
-        </>
+            {selected.scan_result && Object.keys(selected.scan_result).length > 0 ? (
+              <VerboseResultPanel scan={selected.scan_result} />
+            ) : (
+              <p className="text-sm text-zinc-500">No stored analysis for this item.</p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

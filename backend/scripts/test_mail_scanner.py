@@ -271,10 +271,26 @@ async def run_mail_scanner_tests(runner: TestRunner) -> None:
     async def _fake_get(access_token: str, message_id: str) -> NormalizedMessage:
         return gmail_provider._normalize(message_id, _gmail_payload(message_id))
 
+    # Phase 4: the scan route now runs enforcement; stub the provider writes.
+    async def _fake_quarantine(access_token: str, message_id: str, label: str) -> dict:
+        return {"id": message_id}
+
+    async def _fake_rule(access_token: str, sender_email: str, target_label: str) -> dict:
+        return {"id": "filter-mock"}
+
+    async def _fake_label_stub(access_token: str) -> str:
+        return "Label_Q"
+
     _orig_list = gmail_provider.list_messages
     _orig_get = gmail_provider.get_message
+    _orig_quarantine = gmail_provider.quarantine_message
+    _orig_label = gmail_provider.ensure_quarantine_label
+    _orig_rule = gmail_provider.create_sender_rule
     gmail_provider.list_messages = _fake_list
     gmail_provider.get_message = _fake_get
+    gmail_provider.quarantine_message = _fake_quarantine
+    gmail_provider.ensure_quarantine_label = _fake_label_stub
+    gmail_provider.create_sender_rule = _fake_rule
 
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     try:
@@ -291,8 +307,9 @@ async def run_mail_scanner_tests(runner: TestRunner) -> None:
             results = res.json()
             runner.assert_true(len(results) == 1, "Scan returns one result per message")
             runner.assert_true(
-                results[0]["provider_operation_status"] == "deferred_to_phase_4",
-                "Scan API reports deferred_to_phase_4 for enforcement recommendations",
+                results[0]["provider_operation_status"] == "success",
+                "Scan API reports the real provider enforcement outcome (quarantined)",
+                f"status={results[0]['provider_operation_status']} detail={results[0]['provider_operation_detail']}",
             )
             runner.assert_true(
                 results[0]["overall_severity"] in ("high", "critical"),
@@ -320,6 +337,9 @@ async def run_mail_scanner_tests(runner: TestRunner) -> None:
         app.dependency_overrides.pop(get_current_user, None)
         gmail_provider.list_messages = _orig_list
         gmail_provider.get_message = _orig_get
+        gmail_provider.quarantine_message = _orig_quarantine
+        gmail_provider.ensure_quarantine_label = _orig_label
+        gmail_provider.create_sender_rule = _orig_rule
         settings.CONNECTOR_TOKEN_KEY = _backup_key
 
     # 12.5 Frontend build is verified in the delivery pipeline (tsc + vite build).

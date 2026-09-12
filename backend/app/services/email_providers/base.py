@@ -65,8 +65,12 @@ class EmailProviderError(Exception):
 
 
 class EmailProvider(Protocol):
-    """Provider-neutral contract. Phase 1-2: profile + connection test only;
-    mailbox scanning (Phase 3) and enforcement actions (Phase 4) extend this."""
+    """Provider-neutral contract.
+
+    Phase 1-2: profile + connection test. Phase 3: message reading.
+    Phase 4: provider-backed enforcement (quarantine, release, delete,
+    sender rules).
+    """
 
     provider: str
     capabilities: ProviderCapability
@@ -74,3 +78,13 @@ class EmailProvider(Protocol):
     async def get_profile(self, access_token: str) -> dict: ...
 
     async def test_connection(self, access_token: str) -> dict: ...
+
+    async def quarantine_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict: ...
+
+    async def release_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict: ...
+
+    async def delete_message(self, access_token: str, message_id: str, permanent: bool) -> dict: ...
+
+    async def create_sender_rule(self, access_token: str, sender_email: str, target_label: str) -> dict: ...
+
+    async def delete_sender_rule(self, access_token: str, rule_id: str) -> dict: ...

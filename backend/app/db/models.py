@@ -443,6 +443,68 @@ class ConnectorOperationLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
 
+class ConnectorSettings(Base):
+    __tablename__ = "connector_settings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    connector_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("email_connector_accounts.id", ondelete="CASCADE"),
+        nullable=False, unique=True, index=True,
+    )
+    # Hours until a quarantined message auto-releases; NULL = manual (never expire).
+    quarantine_expiry_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    permanent_delete_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_quarantine_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+
+class QuarantinedItem(Base):
+    __tablename__ = "quarantined_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    connector_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("email_connector_accounts.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    provider_message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    sender_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Full Phase 3 ScanResult, stored for the review view.
+    scan_result_json: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+    quarantined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # quarantined | released | deleted | expired
+    status: Mapped[str] = mapped_column(String(32), default="quarantined", index=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class BlockedSender(Base):
+    __tablename__ = "blocked_senders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    connector_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("email_connector_accounts.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    sender_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Gmail filter id; NULL when rule creation failed or is not applicable.
+    provider_rule_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    blocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # blocked | released | expired
+    status: Mapped[str] = mapped_column(String(32), default="blocked", index=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class ActionExecution(Base):
     __tablename__ = "action_executions"
 

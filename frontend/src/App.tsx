@@ -9,6 +9,7 @@ import OrganizationManagement from './pages/OrganizationManagement';
 import AdminUsers from './pages/AdminUsers';
 import ComingSoon from './pages/ComingSoon';
 import EmailConnectors from './pages/EmailConnectors';
+import BlockedSenders from './pages/BlockedSenders';
 import { useAuthStore } from './store/authStore';
 import Dashboard from './pages/Dashboard';
 import ApprovalQueue from './pages/ApprovalQueue';
@@ -57,6 +58,7 @@ export default function App() {
         >
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/email-connectors" element={<EmailConnectors />} />
+          <Route path="/blocked-senders" element={<BlockedSenders />} />
           <Route path="/approvals" element={<ApprovalQueue />} />
           <Route path="/quarantine" element={<QuarantineQueue />} />
           <Route path="/blocklist" element={<BlockList />} />

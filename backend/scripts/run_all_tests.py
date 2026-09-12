@@ -384,6 +384,14 @@ async def run_tests():
 
     await run_mail_scanner_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 13. Phase 4 — Enforcement, Quarantine, Sender Rules & Expiry Scheduler
+    # -----------------------------------------------------------------------
+    print("\n[Suite 13] Phase 4 — Enforcement (quarantine, sender rules, expiry)")
+    from test_enforcement import run_enforcement_tests
+
+    await run_enforcement_tests(runner)
+
     return runner.report()
 
 

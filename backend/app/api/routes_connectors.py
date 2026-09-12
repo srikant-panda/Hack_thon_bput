@@ -30,6 +30,7 @@ from app.schemas.connectors import (
     ConnectorTestResponse,
 )
 from app.schemas.email import MessageSummary, NormalizedMessage
+from app.services.action_engine import enforce_scan_results
 from app.schemas.scan_results import ScanResult
 from app.services.connectors import connector_service
 from app.services.connectors.oauth_service import OAuthFlowError, create_gmail_authorization_url, handle_gmail_callback
@@ -266,12 +267,17 @@ async def scan_connector_messages(
             entries = await gmail_provider.list_messages(access_token, max_results=recent)
             message_ids = [entry["id"] for entry in entries]
 
-        results: list[ScanResult] = []
+        pairs: list[tuple[NormalizedMessage, ScanResult]] = []
         for message_id in message_ids:
             message = await gmail_provider.get_message(access_token, message_id)
-            results.append(await scan_message(message))
+            pairs.append((message, await scan_message(message)))
     except (EmailProviderError, TokenRefreshError) as exc:
         raise _provider_error(exc) from exc
+
+    # Phase 4: run the action engine on the fresh scan results. Provider
+    # failures are recorded per-message in the ScanResult (honest reporting),
+    # they do not fail the whole scan.
+    results = await enforce_scan_results(db, connector, pairs)
 
     connector.last_sync_at = datetime.now(timezone.utc)
     await db.commit()

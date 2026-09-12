@@ -10,6 +10,7 @@ import {
   Mail,
   PlugZap,
   RefreshCw,
+  Settings2,
   Unplug,
   X,
   XCircle,
@@ -18,6 +19,7 @@ import PageHeader from '../components/common/PageHeader';
 import VerboseResultPanel from '../components/common/VerboseResultPanel';
 import * as api from '../services/api';
 import type {
+  ConnectorSettings,
   EmailConnectorAccount,
   EmailProviderRegistryEntry,
   MessageAnalysis,
@@ -75,6 +77,10 @@ export default function EmailConnectors() {
   const [scannedConnector, setScannedConnector] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<MessageAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [settingsFor, setSettingsFor] = useState<EmailConnectorAccount | null>(null);
+  const [settings, setSettings] = useState<ConnectorSettings | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [customHours, setCustomHours] = useState('');
 
   const oauthStatus = searchParams.get('status');
   const oauthReason = searchParams.get('reason');
@@ -173,6 +179,32 @@ export default function EmailConnectors() {
       setActionError(err instanceof Error ? err.message : 'Failed to load analysis');
     } finally {
       setAnalysisLoading(false);
+    }
+  };
+
+  const openSettings = async (connector: EmailConnectorAccount) => {
+    setSettingsFor(connector);
+    setActionError(null);
+    try {
+      const current = await api.getConnectorSettings(connector.id);
+      setSettings(current);
+      setCustomHours(current.quarantine_expiry_hours ? String(current.quarantine_expiry_hours) : '');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to load settings');
+    }
+  };
+
+  const saveSettings = async (patch: Parameters<typeof api.updateConnectorSettings>[1]) => {
+    if (!settingsFor) return;
+    setSettingsSaving(true);
+    setActionError(null);
+    try {
+      const updated = await api.updateConnectorSettings(settingsFor.id, patch);
+      setSettings(updated);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to save settings');
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -355,6 +387,14 @@ export default function EmailConnectors() {
                   )}
                   <button
                     type="button"
+                    onClick={() => openSettings(connector)}
+                    className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-800/60"
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                    Settings
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleTest(connector)}
                     disabled={testingId === connector.id || isMockMode}
                     className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-800/60 disabled:opacity-50"
@@ -484,6 +524,118 @@ export default function EmailConnectors() {
                 <p className="mt-2 font-mono text-[11px] text-zinc-500">
                   Attachments (metadata only):{' '}
                   {analysis.message.attachments_meta.map((a) => `${a.filename} (${a.mime_type})`).join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Connector enforcement settings drawer */}
+      {settingsFor && settings && (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/70 backdrop-blur-sm" onClick={() => setSettingsFor(null)}>
+          <div
+            className="h-full w-full max-w-md overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-zinc-100">Enforcement Settings</h3>
+                <p className="mt-0.5 font-mono text-xs text-zinc-500">{settingsFor.provider_email}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsFor(null)}
+                className="rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 transition hover:text-red-400"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              <div>
+                <label className="mb-1.5 block font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                  Quarantine expiry
+                </label>
+                <select
+                  value={
+                    settings.quarantine_expiry_hours === null
+                      ? 'manual'
+                      : [3, 24].includes(settings.quarantine_expiry_hours)
+                        ? String(settings.quarantine_expiry_hours)
+                        : 'custom'
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === 'manual') saveSettings({ expiry_mode: 'manual' });
+                    else if (v === '3') saveSettings({ expiry_mode: 'hours', quarantine_expiry_hours: 3 });
+                    else if (v === '24') saveSettings({ expiry_mode: 'hours', quarantine_expiry_hours: 24 });
+                    else if (v === 'custom') saveSettings({ expiry_mode: 'hours', quarantine_expiry_hours: 72 });
+                  }}
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-red-500/60"
+                >
+                  <option value="3">3 Hours</option>
+                  <option value="24">24 Hours</option>
+                  <option value="custom">Custom</option>
+                  <option value="manual">Manual (Never expire)</option>
+                </select>
+                {settings.quarantine_expiry_hours !== null &&
+                  ![3, 24].includes(settings.quarantine_expiry_hours) && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={720}
+                        value={customHours}
+                        onChange={(e) => setCustomHours(e.target.value)}
+                        className="w-24 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-red-500/60"
+                      />
+                      <span className="text-xs text-zinc-400">hours</span>
+                      <button
+                        type="button"
+                        disabled={settingsSaving || !customHours}
+                        onClick={() => saveSettings({ expiry_mode: 'hours', quarantine_expiry_hours: Number(customHours) })}
+                        className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-red-500 disabled:opacity-50"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  )}
+              </div>
+
+              <label className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/90 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-100">Auto-quarantine</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">Enforce quarantine and sender blocks automatically on high/critical verdicts.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.auto_quarantine_enabled}
+                  disabled={settingsSaving}
+                  onChange={(e) => saveSettings({ auto_quarantine_enabled: e.target.checked })}
+                  className="h-5 w-5 accent-red-600"
+                />
+              </label>
+
+              <label className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/90 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-100">Permanent delete</p>
+                  <p className="mt-0.5 text-xs text-zinc-500">
+                    OFF: deletion moves mail to Gmail trash. ON: deletion permanently removes mail from Gmail.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.permanent_delete_enabled}
+                  disabled={settingsSaving}
+                  onChange={(e) => saveSettings({ permanent_delete_enabled: e.target.checked })}
+                  className="h-5 w-5 accent-red-600"
+                />
+              </label>
+
+              {settingsSaving && (
+                <p className="flex items-center gap-2 text-xs text-zinc-500">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
                 </p>
               )}
             </div>

@@ -17,6 +17,7 @@ from app.db.models import ConnectorOAuthState, EmailConnectorAccount
 from app.services.email_providers.base import ConnectorStatus
 from app.services.email_providers.gmail import (
     GMAIL_SCOPE,
+    GMAIL_SETTINGS_SCOPE,
     GOOGLE_AUTH_URL,
     GOOGLE_TOKEN_URL,
     gmail_provider,
@@ -63,7 +64,7 @@ async def create_gmail_authorization_url(
         "client_id": settings.GOOGLE_GMAIL_CLIENT_ID,
         "redirect_uri": settings.GOOGLE_GMAIL_REDIRECT_URI,
         "response_type": "code",
-        "scope": GMAIL_SCOPE,
+        "scope": f"{GMAIL_SCOPE} {GMAIL_SETTINGS_SCOPE}",
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
