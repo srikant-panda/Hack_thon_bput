@@ -1,10 +1,14 @@
-"""SOC assistant chat service — intent routing, data-backed answers, LLM escalation.
+"""SOC Assistant — strict whitelist chat service (non-disclosure policy).
 
-The assistant is a conversational SOC helper, NOT an artifact scanner: chat text
-is classified by intent first and never passed through the threat-detection
-heuristics. Data intents (summary, critical alerts, MITRE, triage) query the
-caller's organization data directly; free-text security questions go to the LLM
-engine, with the help menu (never artifact-analysis output) as the fallback.
+The assistant answers ONLY live operational security data for the caller's
+organization. All system internals (key management, models, scoring formulas,
+architecture, configuration, secrets) are CLASSIFIED: probes receive a
+standardized refusal and are audit-logged — probing the assistant is itself an
+observable security event.
+
+Every reply is composed deterministically from the database. No LLM is invoked
+on any path: free-text generation was the leak surface this policy closes, and
+deterministic composition guarantees counts and titles can never be invented.
 """
 
 import logging
@@ -15,7 +19,6 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.llm_client import call_llm
 from app.db.models import Alert
 from app.services import audit_service
 
@@ -29,8 +32,7 @@ HELP_MENU = (
     "• Show critical alerts — the highest-severity items right now\n"
     "• List MITRE techniques detected — ATT&CK techniques in your alerts\n"
     "• What should I investigate first? — suggested triage order\n\n"
-    "Any other security question goes to the AI engine (with live alert context). "
-    "I answer from your organization's data only — I never invent numbers."
+    "I answer from your organization's live security data only."
 )
 
 GREETING_REPLY = (
@@ -39,24 +41,68 @@ GREETING_REPLY = (
     "investigate first. What do you need?"
 )
 
-# Ordered: first match wins. Greeting is anchor-anchored so questions that
-# merely contain these substrings are not misrouted.
+REFUSAL_INTERNAL = (
+    "I can't disclose CYBERGUARD system internals, including key management, "
+    "models, or architecture. I can help with today's threats, critical "
+    "alerts, MITRE techniques, or investigation priority. Which do you need?"
+)
+
+REFUSAL_OUT_OF_SCOPE = (
+    "I only advise on CYBERGUARD's live security operations: today's threats, "
+    "critical alerts, MITRE techniques, and investigation priority. Which do "
+    "you need?"
+)
+
+# Ordered gate: first match wins. INTERNAL_PROBE outranks the OPS classes so a
+# question like "how many keys rotate today" is treated as a probe, not stats.
 _INTENT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("greeting", re.compile(r"^\s*(hi|helo+|hello|hey|yo|greetings|good\s*(morning|afternoon|evening))\b", re.I)),
-    ("help", re.compile(r"\b(help|what can you do|commands|capabilities|options)\b", re.I)),
-    ("mitre_list", re.compile(r"\b(mitre|att&ck|techniques?)\b", re.I)),
-    ("summarize_threats", re.compile(r"\b(summar\w*|overview|sitrep|situation report|threat picture|current threats|today'?s? threats)\b", re.I)),
-    ("critical_alerts", re.compile(r"\b(critical|worst|severe)\b", re.I)),
-    ("investigate_first", re.compile(r"\b(investigate|priorit\w*|triage|what next|first)\b", re.I)),
+    ("GREETING", re.compile(r"^\s*(hi|helo+|hello|hey|yo|greetings|good\s*(morning|afternoon|evening))\b", re.I)),
+    ("HELP", re.compile(r"\b(help|what can you do|commands|capabilities|options)\b", re.I)),
+    # --- CLASSIFIED internals (checked before anything operational) ---
+    ("INTERNAL_PROBE", re.compile(
+        r"rotat"                                   # rotate / rotation / rotates
+        r"|api[ -]?keys?"
+        r"|key management"
+        r"|\bmodels?\b"
+        r"|\bllms?\b"
+        r"|providers?"
+        r"|groq|gemini|openrouter"
+        r"|algorithm|formulas?|blend|weights?|thresholds?"
+        r"|architect"
+        r"|internal"
+        r"|how (do|does) (you|this system|the system) work"
+        r"|what (do|does) (you|this system|the system) use"
+        r"|source code|\bcodebase\b"
+        r"|\bconfig"
+        r"|\benv\b|environment variables?"
+        r"|secrets?"
+        r"|\bprompts?\b"
+        r"|\btrain(ed|ing|s)?\b|datasets?"
+        r"|\bendpoints?\b"
+        r"|\bschemas?\b"
+        r"|ignore (all |any )?(previous|prior) instructions"
+        r"|you are now\b"
+        r"|repeat (your|the) (system )?prompt"
+        r"|print (your|the) (system )?(prompt|config)"
+        r"|(judge|admin) (requires?|demands?|says?)"
+        r"|requires? disclosure"
+        r"|base64"
+        r"|hex[- ]?decod",
+        re.I,
+    )),
+    ("OPS_STATS", re.compile(r"\b(stats?|summaries?|summary|overview|sitrep|situation report|threat picture|todays?|count|how many|current threats|today'?s? threats)\b", re.I)),
+    ("OPS_CRITICAL", re.compile(r"\b(critical|worst|severe)\b", re.I)),
+    ("OPS_MITRE", re.compile(r"\b(mitre|att&ck|techniques?)\b", re.I)),
+    ("OPS_PRIORITIZE", re.compile(r"\b(investigate|priorit\w*|triage|what next|first)\b", re.I)),
 ]
 
 
 def classify_intent(message: str) -> str:
-    """Route a chat message to an intent. Anything unmatched is a general question."""
+    """Whitelist intent gate. Anything unmatched is out of scope."""
     for intent, pattern in _INTENT_PATTERNS:
         if pattern.search(message):
             return intent
-    return "general_question"
+    return "OUT_OF_SCOPE"
 
 
 async def _load_alerts(db: AsyncSession, organization_id: str, limit: int = 500) -> list[Alert]:
@@ -146,48 +192,6 @@ async def _reply_investigate(db: AsyncSession, organization_id: str) -> tuple[st
     return "\n".join(lines), ids
 
 
-async def _reply_general_question(
-    db: AsyncSession,
-    organization_id: str,
-    user_message: str,
-) -> tuple[str, list[str]]:
-    """Free-text questions go to the LLM with org context. The no-key / failed
-    fallback is the help menu — never the artifact-analysis heuristic output."""
-    alerts = await _load_alerts(db, organization_id, CONTEXT_ALERT_COUNT)
-    ids = [a.id for a in alerts]
-
-    severity_counts = Counter(a.severity for a in alerts)
-    top_severity = "none"
-    for band in ("critical", "high", "medium", "low"):
-        if severity_counts.get(band):
-            top_severity = band
-            break
-
-    system_prompt = (
-        "You are CYBERGUARD's SOC Assistant. Answer concisely (max 6 sentences). "
-        f"Context: the organization has {len(alerts)} recent alerts, top severity {top_severity}. "
-        "If the question is unrelated to security, say so politely. "
-        'Respond ONLY with a JSON object: {"reply": "<your answer>"}'
-    )
-    user_prompt = f"Analyst question: {user_message}"
-
-    llm_output = await call_llm(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        module="assistant",
-        indicators=[],
-        raw_data={"question": user_message},
-        risk_score=0,
-    )
-
-    reply = llm_output.get("reply")
-    if not reply:
-        # No usable LLM answer (no keys, all providers exhausted, or unparseable).
-        # The artifact-analysis heuristic output must never reach the chat.
-        return HELP_MENU, ids
-    return str(reply), ids
-
-
 async def chat_with_assistant(
     db: AsyncSession,
     *,
@@ -196,23 +200,36 @@ async def chat_with_assistant(
     user_id: str = "",
     user_name: str = "",
 ) -> dict[str, Any]:
-    """Answer an analyst message with intent routing and org-scoped data."""
+    """Answer an analyst message under the strict whitelist policy."""
     intent = classify_intent(user_message)
 
-    if intent == "greeting":
+    if intent == "INTERNAL_PROBE":
+        # Probing the assistant is itself observable — audit-log the attempt.
+        await audit_service.log_action(
+            db,
+            organization_id=organization_id,
+            user_id=user_id,
+            user_name=user_name,
+            action="SOC Assistant internal probe refused",
+            resource="assistant",
+            details=user_message[:200],
+        )
+        return {"reply": REFUSAL_INTERNAL, "context_used": []}
+
+    if intent == "GREETING":
         reply, context_used = GREETING_REPLY, []
-    elif intent == "help":
+    elif intent == "HELP":
         reply, context_used = HELP_MENU, []
-    elif intent == "summarize_threats":
+    elif intent == "OPS_STATS":
         reply, context_used = await _reply_summary(db, organization_id)
-    elif intent == "critical_alerts":
+    elif intent == "OPS_CRITICAL":
         reply, context_used = await _reply_critical(db, organization_id)
-    elif intent == "mitre_list":
+    elif intent == "OPS_MITRE":
         reply, context_used = await _reply_mitre(db, organization_id)
-    elif intent == "investigate_first":
+    elif intent == "OPS_PRIORITIZE":
         reply, context_used = await _reply_investigate(db, organization_id)
-    else:
-        reply, context_used = await _reply_general_question(db, organization_id, user_message)
+    else:  # OUT_OF_SCOPE
+        reply, context_used = REFUSAL_OUT_OF_SCOPE, []
 
     await audit_service.log_action(
         db,

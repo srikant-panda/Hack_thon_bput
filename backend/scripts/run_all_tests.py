@@ -81,7 +81,7 @@ async def run_tests():
     test_user_id = f"test-usr-{os.urandom(4).hex()}"
     test_email = f"analyst-{test_user_id}@cyberguard.test"
     test_user = CurrentUser(id=test_user_id, email=test_email, full_name="Test SOC Analyst")
-    personal_org_id = f"org-personal-{test_user.id}"
+    personal_org_id = f"org-personal-{os.urandom(8).hex()}"  # <= varchar(36) — Postgres enforces the column length
 
     # Provision user and personal org in a dedicated, isolated session
     async with async_session_maker() as db:
@@ -98,7 +98,7 @@ async def run_tests():
         db.add(personal_org)
         await db.flush()
         member = OrganizationMember(
-            id=f"mem-{test_user.id}-{personal_org.id}",
+            id=f"mem-{os.urandom(12).hex()}",  # <= varchar(36)
             organization_id=personal_org.id,
             user_id=test_user.id,
             role="admin",
