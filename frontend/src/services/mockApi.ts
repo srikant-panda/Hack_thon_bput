@@ -629,3 +629,422 @@ export function generateSimulatedAlert(): Alert {
     timestamp: now,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Dual-Mode Enforcement (Phases 1-3) — in-browser mock store
+// Simulated ActionExecution records + EnforcementPolicy so the org dashboard
+// demo works without the backend. Mutations write audit log entries.
+// ---------------------------------------------------------------------------
+
+import type {
+  ActionExecution,
+  ActionListResponse,
+  EnforcementPolicy,
+  PolicyListResponse,
+  PolicyUpdatePayload,
+} from '../types';
+
+const nowIso = (minutesAgo = 0) =>
+  new Date(Date.now() - minutesAgo * 60_000).toISOString();
+
+let EXEC_SEQ = 0;
+
+function makeExecution(partial: Partial<ActionExecution> & { action_type: string }): ActionExecution {
+  EXEC_SEQ += 1;
+  const status = partial.status ?? 'pending';
+  return {
+    id: partial.id ?? `exec-${String(EXEC_SEQ).padStart(4, '0')}`,
+    organization_id: 'org-corp-001',
+    alert_id: partial.alert_id ?? `ALR-${1200 + EXEC_SEQ}`,
+    event_id: partial.event_id ?? `EVT-${1400 + EXEC_SEQ}`,
+    action_type: partial.action_type,
+    target: partial.target ?? {},
+    status,
+    execution_mode: partial.execution_mode ?? 'server',
+    triggered_by: partial.triggered_by ?? 'api',
+    triggered_by_id: partial.triggered_by_id ?? 'email-gateway-01',
+    requires_approval: partial.requires_approval ?? false,
+    approved_by: partial.approved_by ?? null,
+    approved_at: partial.approved_at ?? null,
+    rejection_reason: partial.rejection_reason ?? null,
+    executed_at:
+      partial.executed_at ?? (status === 'success' ? nowIso(5) : null),
+    execution_result:
+      partial.execution_result ??
+      (status === 'success'
+        ? { simulated: true, message: 'Action executed (simulated)' }
+        : null),
+    risk_score: partial.risk_score ?? 80,
+    severity: partial.severity ?? 'high',
+    threat_type: partial.threat_type ?? partial.module ?? 'phishing',
+    module: partial.module ?? 'phishing',
+    policy_id: 'policy-mock-001',
+    created_at: partial.created_at ?? nowIso(30),
+  };
+}
+
+const MOCK_ACTION_EXECUTIONS: ActionExecution[] = [
+  makeExecution({
+    action_type: 'quarantine_email',
+    status: 'pending',
+    requires_approval: true,
+    module: 'phishing',
+    severity: 'medium',
+    risk_score: 58,
+    target: { sender: 'billing@paypa1-support.com', recipient: 'finance@corp.test', subject: 'Invoice #8841 overdue', email_id: 'eml-9012' },
+    created_at: nowIso(12),
+  }),
+  makeExecution({
+    action_type: 'revoke_session',
+    status: 'pending',
+    requires_approval: true,
+    module: 'account_takeover',
+    severity: 'medium',
+    risk_score: 62,
+    target: { user_id: 'bob.k', login_attempt_id: 'la-5521' },
+    created_at: nowIso(25),
+  }),
+  makeExecution({
+    action_type: 'rate_limit',
+    status: 'pending',
+    requires_approval: true,
+    module: 'api_abuse',
+    severity: 'medium',
+    risk_score: 55,
+    target: { source_ip: '203.0.113.66' },
+    created_at: nowIso(48),
+  }),
+  makeExecution({
+    action_type: 'quarantine_email',
+    status: 'success',
+    module: 'phishing',
+    severity: 'high',
+    risk_score: 87,
+    target: { sender: 'alerts@paypa1-security.com', recipient: 'alice@corp.test', subject: 'URGENT: unauthorized login', email_id: 'eml-8841' },
+    created_at: nowIso(95),
+  }),
+  makeExecution({
+    action_type: 'block_url',
+    status: 'success',
+    module: 'url',
+    severity: 'critical',
+    risk_score: 92,
+    target: { url: 'http://185.220.101.7/secure/login.php' },
+    created_at: nowIso(140),
+  }),
+  makeExecution({
+    action_type: 'block_ip',
+    status: 'success',
+    module: 'network',
+    severity: 'high',
+    risk_score: 78,
+    target: { source_ip: '198.51.100.23', port: 4444 },
+    created_at: nowIso(180),
+  }),
+  makeExecution({
+    action_type: 'revoke_session',
+    status: 'success',
+    module: 'account_takeover',
+    severity: 'high',
+    risk_score: 81,
+    target: { user_id: 'svc.backup', session_id: 'sess-7788' },
+    created_at: nowIso(260),
+  }),
+  makeExecution({
+    action_type: 'block_url',
+    status: 'unblocked',
+    module: 'url',
+    severity: 'medium',
+    risk_score: 60,
+    target: { url: 'http://legacy-cdn.example.com/assets' },
+    execution_result: { simulated: true, unblocked_by: 'USR-001', unblocked_at: nowIso(90) },
+    created_at: nowIso(320),
+  }),
+  makeExecution({
+    action_type: 'quarantine_email',
+    status: 'released',
+    module: 'phishing',
+    severity: 'medium',
+    risk_score: 52,
+    target: { sender: 'it-helpdesk@vendor.com', recipient: 'helpdesk@corp.test', subject: 'Password expiry notice' },
+    execution_result: { simulated: true, released_by: 'USR-001', released_at: nowIso(110) },
+    created_at: nowIso(400),
+  }),
+  makeExecution({
+    action_type: 'block_url',
+    status: 'rejected',
+    module: 'url',
+    severity: 'medium',
+    risk_score: 64,
+    rejection_reason: 'Marketing campaign link verified with vendor',
+    approved_by: 'USR-001',
+    target: { url: 'https://promo.partner-mail.com/spring' },
+    created_at: nowIso(430),
+  }),
+  makeExecution({
+    action_type: 'allow',
+    status: 'skipped',
+    execution_mode: 'client',
+    module: 'phishing',
+    severity: 'low',
+    risk_score: 15,
+    target: { sender: 'newsletter@university.edu' },
+    created_at: nowIso(500),
+  }),
+];
+
+const MOCK_POLICIES: EnforcementPolicy[] = [
+  {
+    id: 'policy-mock-001',
+    organization_id: 'org-corp-001',
+    name: 'Balanced (default)',
+    description: 'Auto-block critical/high, require approval for medium.',
+    is_active: true,
+    phishing_high_threshold: 75,
+    phishing_medium_threshold: 40,
+    deepfake_high_threshold: 70,
+    deepfake_medium_threshold: 50,
+    ato_high_threshold: 60,
+    ato_medium_threshold: 40,
+    network_high_threshold: 70,
+    network_medium_threshold: 50,
+    impersonation_high_threshold: 70,
+    impersonation_medium_threshold: 40,
+    action_on_critical: 'block_and_quarantine',
+    action_on_high: 'block',
+    action_on_medium: 'warn_and_log',
+    action_on_low: 'allow',
+    auto_execute_critical: true,
+    auto_execute_high: true,
+    auto_execute_medium: false,
+    auto_execute_low: false,
+    notify_soc_on_critical: true,
+    notify_soc_on_high: true,
+    notify_user_on_medium: true,
+    created_at: nowIso(60 * 24 * 30),
+    updated_at: nowIso(60 * 24 * 2),
+  },
+  {
+    id: 'policy-mock-002',
+    organization_id: 'org-corp-001',
+    name: 'Strict',
+    description: 'Zero-trust posture: enforce everything above the low band.',
+    is_active: false,
+    phishing_high_threshold: 60,
+    phishing_medium_threshold: 30,
+    deepfake_high_threshold: 55,
+    deepfake_medium_threshold: 35,
+    ato_high_threshold: 50,
+    ato_medium_threshold: 30,
+    network_high_threshold: 55,
+    network_medium_threshold: 35,
+    impersonation_high_threshold: 55,
+    impersonation_medium_threshold: 30,
+    action_on_critical: 'block_and_quarantine',
+    action_on_high: 'block_and_quarantine',
+    action_on_medium: 'block',
+    action_on_low: 'warn_and_log',
+    auto_execute_critical: true,
+    auto_execute_high: true,
+    auto_execute_medium: true,
+    auto_execute_low: false,
+    notify_soc_on_critical: true,
+    notify_soc_on_high: true,
+    notify_user_on_medium: false,
+    created_at: nowIso(60 * 24 * 30),
+    updated_at: nowIso(60 * 24 * 7),
+  },
+];
+
+function simulate(actionType: string): Record<string, unknown> {
+  const simId = `sim_${Math.random().toString(16).slice(2, 12)}`;
+  if (actionType === 'quarantine_email') return { quarantine_id: `q_${simId}`, simulated: true, message: 'Email moved to quarantine (simulated)' };
+  if (actionType === 'block_url') return { block_id: `b_${simId}`, simulated: true, message: 'URL added to blocklist (simulated)' };
+  if (actionType === 'block_ip' || actionType === 'drop_packet') return { block_id: `ip_${simId}`, simulated: true, message: 'IP blocked (simulated)' };
+  if (actionType === 'revoke_session') return { revoke_id: `r_${simId}`, simulated: true, message: 'Active sessions revoked (simulated)' };
+  if (actionType === 'require_mfa') return { mfa_id: `mfa_${simId}`, simulated: true, message: 'MFA challenge issued (simulated)' };
+  if (actionType === 'rate_limit') return { rate_limit_id: `rl_${simId}`, simulated: true, message: 'Rate limit applied (simulated)' };
+  return { flag_id: `f_${simId}`, simulated: true, message: `Flagged: ${actionType}` };
+}
+
+function paginate(items: ActionExecution[], page?: number, pageSize?: number): ActionListResponse {
+  const p = page ?? 1;
+  const size = pageSize ?? 20;
+  return {
+    total: items.length,
+    page: p,
+    page_size: size,
+    items: items.slice((p - 1) * size, p * size),
+  };
+}
+
+export async function mockListActions(params?: {
+  status?: string;
+  action_type?: string;
+  module?: string;
+  severity?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<ActionListResponse> {
+  await jitter();
+  let items = [...MOCK_ACTION_EXECUTIONS];
+  if (params?.status) items = items.filter((i) => i.status === params.status);
+  if (params?.action_type) items = items.filter((i) => i.action_type === params.action_type);
+  if (params?.module) items = items.filter((i) => i.module === params.module);
+  if (params?.severity) items = items.filter((i) => i.severity === params.severity);
+  items.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return paginate(items, params?.page, params?.page_size);
+}
+
+export async function mockGetAction(id: string): Promise<ActionExecution> {
+  await jitter();
+  const found = MOCK_ACTION_EXECUTIONS.find((i) => i.id === id);
+  if (!found) throw new Error(`Action execution ${id} not found`);
+  return found;
+}
+
+export async function mockApproveAction(id: string, comment?: string): Promise<ActionExecution> {
+  await jitter();
+  const found = MOCK_ACTION_EXECUTIONS.find((i) => i.id === id);
+  if (!found) throw new Error(`Action execution ${id} not found`);
+  if (found.status !== 'pending') throw new Error(`Action is not pending (current status: ${found.status})`);
+  found.status = 'success';
+  found.approved_by = 'USR-001';
+  found.approved_at = new Date().toISOString();
+  found.executed_at = found.approved_at;
+  found.execution_result = simulate(found.action_type);
+  addAuditLog({
+    userId: 'USR-001',
+    userName: 'admin@cyberguard.local',
+    action: 'APPROVE_ACTION_EXECUTION',
+    resource: id,
+    details: comment || `Approved '${found.action_type}'`,
+  });
+  return found;
+}
+
+export async function mockRejectAction(id: string, reason: string): Promise<ActionExecution> {
+  await jitter();
+  const found = MOCK_ACTION_EXECUTIONS.find((i) => i.id === id);
+  if (!found) throw new Error(`Action execution ${id} not found`);
+  if (found.status !== 'pending') throw new Error(`Action is not pending (current status: ${found.status})`);
+  found.status = 'rejected';
+  found.rejection_reason = reason;
+  found.approved_by = 'USR-001';
+  found.approved_at = new Date().toISOString();
+  addAuditLog({
+    userId: 'USR-001',
+    userName: 'admin@cyberguard.local',
+    action: 'REJECT_ACTION_EXECUTION',
+    resource: id,
+    details: reason,
+  });
+  return found;
+}
+
+export async function mockListQuarantine(page?: number, pageSize?: number): Promise<ActionListResponse> {
+  await jitter();
+  const items = MOCK_ACTION_EXECUTIONS.filter(
+    (i) =>
+      ['quarantine_email', 'block_and_quarantine', 'flag_for_review'].includes(i.action_type) &&
+      i.status === 'success',
+  ).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return paginate(items, page, pageSize);
+}
+
+export async function mockReleaseQuarantine(id: string): Promise<ActionExecution> {
+  await jitter();
+  const found = MOCK_ACTION_EXECUTIONS.find((i) => i.id === id);
+  if (!found) throw new Error(`Action execution ${id} not found`);
+  if (found.status !== 'success') throw new Error(`Cannot release action with status '${found.status}'`);
+  found.status = 'released';
+  found.execution_result = {
+    ...(found.execution_result ?? {}),
+    released_by: 'USR-001',
+    released_at: new Date().toISOString(),
+  };
+  addAuditLog({
+    userId: 'USR-001',
+    userName: 'admin@cyberguard.local',
+    action: 'RELEASE_QUARANTINE',
+    resource: id,
+    details: 'Quarantined item released',
+  });
+  return found;
+}
+
+export async function mockListBlocklist(page?: number, pageSize?: number): Promise<ActionListResponse> {
+  await jitter();
+  const items = MOCK_ACTION_EXECUTIONS.filter(
+    (i) => ['block_url', 'block_ip', 'drop_packet'].includes(i.action_type) && i.status === 'success',
+  ).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return paginate(items, page, pageSize);
+}
+
+export async function mockUnblockItem(id: string): Promise<ActionExecution> {
+  await jitter();
+  const found = MOCK_ACTION_EXECUTIONS.find((i) => i.id === id);
+  if (!found) throw new Error(`Action execution ${id} not found`);
+  if (found.status !== 'success') throw new Error(`Cannot unblock action with status '${found.status}'`);
+  found.status = 'unblocked';
+  found.execution_result = {
+    ...(found.execution_result ?? {}),
+    unblocked_by: 'USR-001',
+    unblocked_at: new Date().toISOString(),
+  };
+  addAuditLog({
+    userId: 'USR-001',
+    userName: 'admin@cyberguard.local',
+    action: 'UNBLOCK_ITEM',
+    resource: id,
+    details: 'Blocked item removed from blocklist',
+  });
+  return found;
+}
+
+export async function mockListPolicies(): Promise<PolicyListResponse> {
+  await jitter();
+  const active = MOCK_POLICIES.find((p) => p.is_active) ?? null;
+  return {
+    policies: [...MOCK_POLICIES],
+    active_policy_id: active?.id ?? null,
+  };
+}
+
+export async function mockGetPolicy(id: string): Promise<EnforcementPolicy> {
+  await jitter();
+  const found = MOCK_POLICIES.find((p) => p.id === id);
+  if (!found) throw new Error(`Policy ${id} not found`);
+  return found;
+}
+
+export async function mockUpdatePolicy(id: string, updates: PolicyUpdatePayload): Promise<EnforcementPolicy> {
+  await jitter();
+  const found = MOCK_POLICIES.find((p) => p.id === id);
+  if (!found) throw new Error(`Policy ${id} not found`);
+  Object.assign(found, updates, { updated_at: new Date().toISOString() });
+  addAuditLog({
+    userId: 'USR-001',
+    userName: 'admin@cyberguard.local',
+    action: 'UPDATE_ENFORCEMENT_POLICY',
+    resource: id,
+    details: `Updated fields: ${Object.keys(updates).join(', ')}`,
+  });
+  return found;
+}
+
+export async function mockActivatePolicy(id: string): Promise<EnforcementPolicy> {
+  await jitter();
+  const found = MOCK_POLICIES.find((p) => p.id === id);
+  if (!found) throw new Error(`Policy ${id} not found`);
+  for (const policy of MOCK_POLICIES) policy.is_active = policy.id === id;
+  found.updated_at = new Date().toISOString();
+  addAuditLog({
+    userId: 'USR-001',
+    userName: 'admin@cyberguard.local',
+    action: 'ACTIVATE_ENFORCEMENT_POLICY',
+    resource: id,
+    details: `Policy '${found.name}' is now active`,
+  });
+  return found;
+}

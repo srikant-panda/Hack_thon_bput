@@ -333,6 +333,14 @@ async def run_tests():
 
     await run_phase3_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 8. Phase 4 Hotfix — SOC Assistant Intent Routing
+    # -----------------------------------------------------------------------
+    print("\n[Suite 8] Phase 4 Hotfix — SOC Assistant Intent Routing")
+    from test_assistant import run_assistant_tests
+
+    await run_assistant_tests(runner)
+
     return runner.report()
 
 

@@ -27,7 +27,9 @@ import SeverityBadge from '../components/common/SeverityBadge';
 import StatusPill from '../components/common/StatusPill';
 import DataTable, { type Column } from '../components/common/DataTable';
 import { PanelSkeleton } from '../components/common/LoadingSkeleton';
+import EnforcementMetrics from '../components/dashboard/EnforcementMetrics';
 import { MODULE_LABELS } from '../constants';
+import { useAuthStore } from '../store/authStore';
 
 const tooltipStyle = {
   backgroundColor: '#101010',
@@ -40,6 +42,8 @@ const tooltipStyle = {
 export default function Dashboard() {
   const navigate = useNavigate();
   const addToast = useUiStore((s) => s.addToast);
+  const activeOrganization = useAuthStore((s) => s.activeOrganization);
+  const isOrgWorkspace = Boolean(activeOrganization && !activeOrganization.is_personal);
   const { data, loading, error, refetch } = useApi(() => api.getDashboardSummary(), []);
   const liveAlerts = useUiStore((s) => s.liveSimulation);
   useRealtimeAlerts(liveAlerts, refetch);
@@ -205,6 +209,14 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+
+          {/* Enforcement metrics (organization workspaces only) */}
+          {isOrgWorkspace && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-zinc-200">Enforcement Metrics</h3>
+              <EnforcementMetrics />
+            </div>
+          )}
 
           {/* Recent alerts */}
           <div>

@@ -115,7 +115,7 @@ export default function SocAssistant({ open, userName, onClose }: Props) {
             <div className="flex justify-start">
               <div className="flex items-center gap-2 rounded-xl rounded-bl-sm bg-zinc-800 px-3.5 py-2.5 text-sm text-zinc-400 ring-1 ring-zinc-700/50">
                 <Shield className="h-3.5 w-3.5 animate-pulse text-red-400" />
-                Analyzing threat data...
+                Thinking…
               </div>
             </div>
           )}

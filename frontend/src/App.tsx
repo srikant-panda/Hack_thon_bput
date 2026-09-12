@@ -8,6 +8,11 @@ import ResetPassword from './pages/ResetPassword';
 import OrganizationManagement from './pages/OrganizationManagement';
 import AdminUsers from './pages/AdminUsers';
 import Dashboard from './pages/Dashboard';
+import ApprovalQueue from './pages/ApprovalQueue';
+import QuarantineQueue from './pages/QuarantineQueue';
+import BlockList from './pages/BlockList';
+import ActionLog from './pages/ActionLog';
+import PolicyManagement from './pages/PolicyManagement';
 import PhishingAnalysis from './pages/PhishingAnalysis';
 import UrlAnalysis from './pages/UrlAnalysis';
 import ImpersonationAnalysis from './pages/ImpersonationAnalysis';
@@ -37,6 +42,18 @@ export default function App() {
           }
         >
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/approvals" element={<ApprovalQueue />} />
+          <Route path="/quarantine" element={<QuarantineQueue />} />
+          <Route path="/blocklist" element={<BlockList />} />
+          <Route path="/action-log" element={<ActionLog />} />
+          <Route
+            path="/policies"
+            element={
+              <RoleGuard minimumRole="admin">
+                <PolicyManagement />
+              </RoleGuard>
+            }
+          />
           <Route path="/organization" element={<OrganizationManagement />} />
           <Route
             path="/admin/users"

@@ -1,18 +1,23 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
+  Ban,
   Bell,
   Bot,
   Building2,
   ChevronsLeft,
   ChevronsRight,
+  ClipboardCheck,
   FileBarChart,
   KeyRound,
   LayoutDashboard,
   Link,
   Mail,
   Network,
+  PackageOpen,
   ScrollText,
   Settings,
+  Settings2,
   Shield,
   ShieldAlert,
   UserX,
@@ -20,6 +25,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { useUiStore } from '../../store/uiStore';
+import { useAuthStore } from '../../store/authStore';
+import * as api from '../../services/api';
 
 const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -38,9 +45,74 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
+const ORG_NAV_ITEMS: { to: string; label: string; icon: typeof Bell; adminOnly?: boolean }[] = [
+  { to: '/approvals', label: 'Approval Queue', icon: ClipboardCheck },
+  { to: '/quarantine', label: 'Quarantine Queue', icon: PackageOpen },
+  { to: '/blocklist', label: 'Block List', icon: Ban },
+  { to: '/action-log', label: 'Action Log', icon: ScrollText },
+  { to: '/policies', label: 'Policy Management', icon: Settings2, adminOnly: true },
+];
+
+function linkClass(isActive: boolean, collapsed: boolean) {
+  return `flex items-center gap-3 border-l-2 py-2 pr-3 text-sm transition ${
+    collapsed ? 'justify-center pl-0' : 'pl-4'
+  } ${
+    isActive
+      ? 'border-red-600 bg-zinc-900 text-red-400 font-semibold'
+      : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-100'
+  }`;
+}
+
 export default function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const setAssistantOpen = useUiStore((s) => s.setAssistantOpen);
+  const activeOrganization = useAuthStore((s) => s.activeOrganization);
+  const can = useAuthStore((s) => s.can);
+  const isOrgWorkspace = Boolean(activeOrganization && !activeOrganization.is_personal);
+  const isAdmin = can('admin');
+
+  // Pending-approval badge for the ORGANIZATION section (polled every 60s)
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isOrgWorkspace) return;
+    let cancelled = false;
+    const fetchPending = () =>
+      api
+        .listActions({ status: 'pending', page_size: 1 })
+        .then((res) => {
+          if (!cancelled) setPendingCount(res.total);
+        })
+        .catch(() => undefined);
+    fetchPending();
+    const interval = setInterval(fetchPending, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isOrgWorkspace]);
+
+  type NavItem = { to: string; label: string; icon: typeof Bell; adminOnly?: boolean };
+
+  const renderItems = (items: NavItem[]) =>
+    items.map(({ to, label, icon: Icon, adminOnly }) => {
+      if (adminOnly && !isAdmin) return null;
+      return (
+        <NavLink
+          key={to}
+          to={to}
+          title={collapsed ? label : undefined}
+          className={({ isActive }) => linkClass(isActive, collapsed)}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          {!collapsed && <span className="truncate">{label}</span>}
+          {!collapsed && to === '/approvals' && pendingCount !== null && pendingCount > 0 && (
+            <span className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+              {pendingCount}
+            </span>
+          )}
+        </NavLink>
+      );
+    });
 
   return (
     <aside
@@ -63,25 +135,18 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3">
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              `flex items-center gap-3 border-l-2 py-2 pr-3 text-sm transition ${
-                collapsed ? 'justify-center pl-0' : 'pl-4'
-              } ${
-                isActive
-                  ? 'border-red-600 bg-zinc-900 text-red-400 font-semibold'
-                  : 'border-transparent text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-100'
-              }`
-            }
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span className="truncate">{label}</span>}
-          </NavLink>
-        ))}
+        {renderItems(NAV_ITEMS)}
+
+        {isOrgWorkspace && (
+          <>
+            <div className={`mt-3 border-t border-zinc-800/80 pt-3 ${collapsed ? '' : 'px-4'}`}>
+              {!collapsed && (
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Organization</p>
+              )}
+            </div>
+            {renderItems(ORG_NAV_ITEMS)}
+          </>
+        )}
       </nav>
 
       {/* Bottom section */}

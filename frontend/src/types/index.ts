@@ -235,3 +235,113 @@ export interface OrganizationMember {
   joinedAt: string;
 }
 
+
+// ---------------------------------------------------------------------------
+// Dual-Mode Enforcement (Phases 1-3)
+// ---------------------------------------------------------------------------
+
+export type ActionExecutionStatus =
+  | 'pending'
+  | 'approved'
+  | 'executing'
+  | 'success'
+  | 'failed'
+  | 'rejected'
+  | 'skipped'
+  | 'released'
+  | 'unblocked';
+
+export interface ActionExecution {
+  id: string;
+  organization_id: string | null;
+  alert_id: string | null;
+  event_id: string | null;
+  action_type: string;
+  target: Record<string, unknown>;
+  status: ActionExecutionStatus;
+  execution_mode: 'client' | 'server';
+  triggered_by: string;
+  triggered_by_id?: string | null;
+  requires_approval: boolean;
+  approved_by: string | null;
+  approved_at: string | null;
+  rejection_reason: string | null;
+  executed_at: string | null;
+  execution_result: Record<string, unknown> | null;
+  risk_score: number;
+  severity: Exclude<Severity, 'safe'>;
+  threat_type: string;
+  module: string;
+  policy_id: string | null;
+  created_at: string;
+}
+
+export interface ActionListResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: ActionExecution[];
+}
+
+export interface EnforcementPolicy {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  phishing_high_threshold: number;
+  phishing_medium_threshold: number;
+  deepfake_high_threshold: number;
+  deepfake_medium_threshold: number;
+  ato_high_threshold: number;
+  ato_medium_threshold: number;
+  network_high_threshold: number;
+  network_medium_threshold: number;
+  impersonation_high_threshold: number;
+  impersonation_medium_threshold: number;
+  action_on_critical: string;
+  action_on_high: string;
+  action_on_medium: string;
+  action_on_low: string;
+  auto_execute_critical: boolean;
+  auto_execute_high: boolean;
+  auto_execute_medium: boolean;
+  auto_execute_low: boolean;
+  notify_soc_on_critical: boolean;
+  notify_soc_on_high: boolean;
+  notify_user_on_medium: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyListResponse {
+  policies: EnforcementPolicy[];
+  active_policy_id: string | null;
+}
+
+export interface PolicyUpdatePayload {
+  name?: string;
+  description?: string;
+  is_active?: boolean;
+  phishing_high_threshold?: number;
+  phishing_medium_threshold?: number;
+  deepfake_high_threshold?: number;
+  deepfake_medium_threshold?: number;
+  ato_high_threshold?: number;
+  ato_medium_threshold?: number;
+  network_high_threshold?: number;
+  network_medium_threshold?: number;
+  impersonation_high_threshold?: number;
+  impersonation_medium_threshold?: number;
+  action_on_critical?: string;
+  action_on_high?: string;
+  action_on_medium?: string;
+  action_on_low?: string;
+  auto_execute_critical?: boolean;
+  auto_execute_high?: boolean;
+  auto_execute_medium?: boolean;
+  auto_execute_low?: boolean;
+  notify_soc_on_critical?: boolean;
+  notify_soc_on_high?: boolean;
+  notify_user_on_medium?: boolean;
+}

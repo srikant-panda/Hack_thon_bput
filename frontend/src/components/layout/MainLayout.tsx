@@ -45,8 +45,8 @@ export default function MainLayout() {
         </main>
       </div>
 
-      {/* Toasts */}
-      <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-80 flex-col gap-2">
+      {/* Toasts — stacked below the h-14 topbar; z-30 keeps header dropdowns above them */}
+      <div className="pointer-events-none fixed right-4 top-16 z-30 flex w-80 flex-col gap-2">
         {toasts.map((t) => (
           <Toast key={t.id} message={t.message} severity={t.severity} onClose={() => removeToast(t.id)} />
         ))}

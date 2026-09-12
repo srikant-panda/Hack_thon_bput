@@ -20,6 +20,12 @@ const STATUS_STYLES: Record<string, string> = {
   approved: 'bg-zinc-500/20 text-zinc-200 ring-zinc-500/40',
   executed: 'bg-white/10 text-white ring-white/30',
   rejected: 'bg-red-500/15 text-red-400 ring-red-500/40',
+  // Dual-mode enforcement statuses (Phases 1-3)
+  success: 'bg-white/10 text-white ring-white/30',
+  released: 'bg-white/10 text-white ring-white/30',
+  unblocked: 'bg-white/10 text-white ring-white/30',
+  skipped: 'bg-zinc-600/30 text-zinc-400 ring-zinc-500/40',
+  executing: 'bg-red-400/15 text-red-400 ring-red-400/40',
 };
 
 export default function StatusPill({ status }: { status: string }) {

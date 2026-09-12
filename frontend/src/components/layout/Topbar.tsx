@@ -70,7 +70,7 @@ export default function Topbar() {
   const currentOrg = activeOrganization || (organizations.length > 0 ? organizations[0] : null);
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-zinc-800 bg-zinc-900/90 px-5 backdrop-blur">
+    <header className="relative z-40 flex h-14 items-center justify-between border-b border-zinc-800 bg-zinc-900/90 px-5 backdrop-blur">
       <h1 className="text-base font-semibold text-zinc-100">{title}</h1>
 
       <div className="flex items-center gap-3">

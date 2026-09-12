@@ -256,7 +256,11 @@ class ActionExecutor:
         Extracts relevant identifiers from the analysis raw_data.
         """
 
-        if action_type == "quarantine_email":
+        if action_type == "quarantine_email" or (
+            # Soft actions keep the email context visible for reviewers.
+            action_type in ("warn_and_log", "tag_and_warn", "flag_for_review")
+            and raw_data.get("subject")
+        ):
             return {
                 "email_id": raw_data.get("email_id", alert.event_id),
                 "sender": raw_data.get("sender"),

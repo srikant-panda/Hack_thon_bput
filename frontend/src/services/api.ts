@@ -1,10 +1,15 @@
 import type {
+  ActionExecution,
+  ActionListResponse,
   Alert,
   AnalysisResult,
   AuditLog,
   DashboardSummary,
+  EnforcementPolicy,
   Incident,
   IncidentStatus,
+  PolicyListResponse,
+  PolicyUpdatePayload,
   ResponseActionCatalog,
   ResponseExecution,
   Severity,
@@ -542,3 +547,96 @@ export function isMockMode(): boolean {
 }
 
 export { mockApi };
+
+// ---------------------------------------------------------------------------
+// Dual-Mode Enforcement — action executions, quarantine, blocklist, policies
+// ---------------------------------------------------------------------------
+
+export async function listActions(params?: {
+  status?: string;
+  action_type?: string;
+  module?: string;
+  severity?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<ActionListResponse> {
+  if (USE_MOCK) return mockApi.mockListActions(params);
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.action_type) query.set('action_type', params.action_type);
+  if (params?.module) query.set('module', params.module);
+  if (params?.severity) query.set('severity', params.severity);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.page_size) query.set('page_size', String(params.page_size));
+  return apiFetch(`/actions?${query.toString()}`);
+}
+
+export async function getAction(id: string): Promise<ActionExecution> {
+  if (USE_MOCK) return mockApi.mockGetAction(id);
+  return apiFetch(`/actions/${id}`);
+}
+
+export async function approveAction(id: string, comment?: string): Promise<ActionExecution> {
+  if (USE_MOCK) return mockApi.mockApproveAction(id, comment);
+  return apiFetch(`/actions/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ comment: comment ?? null }),
+  });
+}
+
+export async function rejectAction(id: string, reason: string): Promise<ActionExecution> {
+  if (USE_MOCK) return mockApi.mockRejectAction(id, reason);
+  return apiFetch(`/actions/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function listQuarantine(page?: number, pageSize?: number): Promise<ActionListResponse> {
+  if (USE_MOCK) return mockApi.mockListQuarantine(page, pageSize);
+  const query = new URLSearchParams();
+  if (page) query.set('page', String(page));
+  if (pageSize) query.set('page_size', String(pageSize));
+  return apiFetch(`/actions/quarantine/list?${query.toString()}`);
+}
+
+export async function releaseQuarantine(id: string): Promise<ActionExecution> {
+  if (USE_MOCK) return mockApi.mockReleaseQuarantine(id);
+  return apiFetch(`/actions/quarantine/${id}/release`, { method: 'POST' });
+}
+
+export async function listBlocklist(page?: number, pageSize?: number): Promise<ActionListResponse> {
+  if (USE_MOCK) return mockApi.mockListBlocklist(page, pageSize);
+  const query = new URLSearchParams();
+  if (page) query.set('page', String(page));
+  if (pageSize) query.set('page_size', String(pageSize));
+  return apiFetch(`/actions/blocklist/list?${query.toString()}`);
+}
+
+export async function unblockItem(id: string): Promise<ActionExecution> {
+  if (USE_MOCK) return mockApi.mockUnblockItem(id);
+  return apiFetch(`/actions/blocklist/${id}/unblock`, { method: 'POST' });
+}
+
+export async function listPolicies(): Promise<PolicyListResponse> {
+  if (USE_MOCK) return mockApi.mockListPolicies();
+  return apiFetch('/policies');
+}
+
+export async function getPolicy(id: string): Promise<EnforcementPolicy> {
+  if (USE_MOCK) return mockApi.mockGetPolicy(id);
+  return apiFetch(`/policies/${id}`);
+}
+
+export async function updatePolicy(id: string, updates: PolicyUpdatePayload): Promise<EnforcementPolicy> {
+  if (USE_MOCK) return mockApi.mockUpdatePolicy(id, updates);
+  return apiFetch(`/policies/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function activatePolicy(id: string): Promise<EnforcementPolicy> {
+  if (USE_MOCK) return mockApi.mockActivatePolicy(id);
+  return apiFetch(`/policies/${id}/activate`, { method: 'POST' });
+}
