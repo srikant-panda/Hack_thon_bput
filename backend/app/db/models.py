@@ -39,6 +39,8 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # Supabase Auth UUID
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    account_type: Mapped[str] = mapped_column(String(16), default="user")  # 'user' | 'organization' (frozen)
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_single_user: Mapped[bool] = mapped_column(Boolean, default=True)
     active_organization_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
@@ -118,6 +120,7 @@ class Event(Base):
     raw_data: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
     status: Mapped[str] = mapped_column(String(32), default="received", index=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
     # Relationships
@@ -140,6 +143,7 @@ class MediaFile(Base):
     file_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     file_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
     # Relationships
@@ -171,6 +175,7 @@ class Alert(Base):
     target_service: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     source_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
     # Relationships
@@ -219,6 +224,7 @@ class Incident(Base):
     status: Mapped[str] = mapped_column(String(32), default="open", index=True)
     assigned_to: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
 
@@ -289,6 +295,7 @@ class ResponseExecution(Base):
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     executed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     approved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
     # Relationships
@@ -308,6 +315,7 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(255), nullable=False)
     resource: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
     # Relationships
@@ -318,10 +326,13 @@ class EnforcementPolicy(Base):
     __tablename__ = "enforcement_policies"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
-    organization_id: Mapped[str] = mapped_column(
+    # Nullable: personal-workspace policies carry organization_id = NULL and are
+    # owner-scoped via owner_user_id instead.
+    organization_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        nullable=True, index=True,
     )
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)  # e.g. "Strict", "Balanced", "Permissive"
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
@@ -382,6 +393,7 @@ class ActionExecution(Base):
     event_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("events.id", ondelete="SET NULL"), nullable=True, index=True,
     )
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     # What to do
     # values: quarantine_email | block_url | drop_packet | block_ip | revoke_session |

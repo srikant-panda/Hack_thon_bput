@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import TenantContext, require_role
+from app.core.security import TenantContext, require_role, tenant_criteria
 from app.db.models import ActionExecution, Alert
 from app.db.session import get_db
 from app.services.action_executor import action_executor
@@ -98,9 +98,7 @@ async def list_actions(
     - severity: critical | high | medium | low
     - page, page_size: pagination
     """
-    query = select(ActionExecution).where(
-        ActionExecution.organization_id == tenant.organization_id
-    )
+    query = select(ActionExecution).where(tenant_criteria(ActionExecution, tenant))
 
     if status_filter:
         query = query.where(ActionExecution.status == status_filter)
@@ -137,7 +135,7 @@ async def list_quarantine(
 ) -> ActionListResponse:
     """List all currently quarantined items (emails, media, URLs)."""
     query = select(ActionExecution).where(
-        ActionExecution.organization_id == tenant.organization_id,
+        tenant_criteria(ActionExecution, tenant),
         ActionExecution.action_type.in_(QUARANTINE_ACTION_TYPES),
         ActionExecution.status == "success",
     )
@@ -166,7 +164,7 @@ async def list_blocklist(
 ) -> ActionListResponse:
     """List all currently blocked items (URLs, IPs)."""
     query = select(ActionExecution).where(
-        ActionExecution.organization_id == tenant.organization_id,
+        tenant_criteria(ActionExecution, tenant),
         ActionExecution.action_type.in_(BLOCK_ACTION_TYPES),
         ActionExecution.status == "success",
     )
@@ -193,7 +191,7 @@ async def get_action(
     tenant: TenantContext = Depends(require_role(["admin", "analyst", "viewer"])),
 ) -> ActionExecutionResponse:
     """Get a single action execution by ID."""
-    action = await _get_action_or_404(db, action_id, tenant.organization_id)
+    action = await _get_action_or_404(db, action_id, tenant)
     return _to_response(action)
 
 
@@ -208,7 +206,7 @@ async def approve_action(
     tenant: TenantContext = Depends(require_role(["admin", "analyst"])),
 ) -> ActionExecutionResponse:
     """Approve a pending action; the enforcement action executes immediately."""
-    action = await _get_action_or_404(db, action_id, tenant.organization_id)
+    action = await _get_action_or_404(db, action_id, tenant)
 
     if action.status != "pending":
         raise HTTPException(
@@ -226,6 +224,10 @@ async def approve_action(
     execution_result = await action_executor.execute_simulated(action.action_type, alert)
 
     now = datetime.now(timezone.utc)
+    if not action.owner_user_id:
+        # action_executor is org-scoped; personal workspaces need the owner
+        # stamped so row-level security and tenant filters resolve the row.
+        action.owner_user_id = tenant.owner_user_id
     action.status = "success"
     action.approved_by = tenant.user_id
     action.approved_at = now
@@ -237,7 +239,7 @@ async def approve_action(
 
     await log_action(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         user_id=tenant.user_id,
         user_name=tenant.user_email,
         action="approve_action_execution",
@@ -257,7 +259,7 @@ async def reject_action(
     tenant: TenantContext = Depends(require_role(["admin", "analyst"])),
 ) -> ActionExecutionResponse:
     """Reject a pending action; the enforcement action is never executed."""
-    action = await _get_action_or_404(db, action_id, tenant.organization_id)
+    action = await _get_action_or_404(db, action_id, tenant)
 
     if action.status != "pending":
         raise HTTPException(
@@ -275,7 +277,7 @@ async def reject_action(
 
     await log_action(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         user_id=tenant.user_id,
         user_name=tenant.user_email,
         action="reject_action_execution",
@@ -297,7 +299,7 @@ async def release_quarantine(
     tenant: TenantContext = Depends(require_role(["admin", "analyst"])),
 ) -> ActionExecutionResponse:
     """Release a quarantined item (e.g. a false positive) back to the user."""
-    action = await _get_action_or_404(db, action_id, tenant.organization_id)
+    action = await _get_action_or_404(db, action_id, tenant)
 
     if action.action_type not in QUARANTINE_ACTION_TYPES:
         raise HTTPException(
@@ -322,7 +324,7 @@ async def release_quarantine(
 
     await log_action(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         user_id=tenant.user_id,
         user_name=tenant.user_email,
         action="release_quarantine",
@@ -341,7 +343,7 @@ async def unblock_item(
     tenant: TenantContext = Depends(require_role(["admin", "analyst"])),
 ) -> ActionExecutionResponse:
     """Remove a previously blocked URL/IP from the block list."""
-    action = await _get_action_or_404(db, action_id, tenant.organization_id)
+    action = await _get_action_or_404(db, action_id, tenant)
 
     if action.action_type not in BLOCK_ACTION_TYPES:
         raise HTTPException(
@@ -366,7 +368,7 @@ async def unblock_item(
 
     await log_action(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         user_id=tenant.user_id,
         user_name=tenant.user_email,
         action="unblock_item",
@@ -382,13 +384,13 @@ async def unblock_item(
 
 
 async def _get_action_or_404(
-    db: AsyncSession, action_id: str, organization_id: str
+    db: AsyncSession, action_id: str, tenant: TenantContext
 ) -> ActionExecution:
-    """Fetch an action execution or raise 404 (org-scoped)."""
+    """Fetch an action execution or raise 404 (tenant-scoped)."""
     result = await db.execute(
         select(ActionExecution).where(
             ActionExecution.id == action_id,
-            ActionExecution.organization_id == organization_id,
+            tenant_criteria(ActionExecution, tenant),
         )
     )
     action = result.scalars().first()

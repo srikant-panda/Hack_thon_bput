@@ -28,13 +28,21 @@ interface AuthState {
   hydrated: boolean;
   role: Role;
   fullName: string | null;
+  username: string | null;
+  /** Organization accounts are frozen server-side (ORG_ENABLED=false). */
+  orgEnabled: boolean;
   organizations: Organization[];
   activeOrganization: Organization | null;
   activeOrganizationId: string | null;
 
   login: (email: string, password: string) => Promise<void>;
   loginWithOAuth: (provider: 'google' | 'github') => Promise<void>;
-  signUp: (fullName: string, email: string, password: string) => Promise<{ confirmationPending: boolean }>;
+  signUp: (
+    fullName: string,
+    email: string,
+    password: string,
+    username: string,
+  ) => Promise<{ confirmationPending: boolean }>;
   requestPasswordReset: (email: string) => Promise<void>;
   completePasswordReset: (newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -69,6 +77,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hydrated: false,
   role: 'analyst',
   fullName: null,
+  username: null,
+  orgEnabled: false,
   organizations: [],
   activeOrganization: null,
   activeOrganizationId: localStorage.getItem(ACTIVE_ORG_KEY),
@@ -95,14 +105,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       password === 'demo1234';
 
     try {
-      const { data, error } = await getSupabase().auth.signInWithPassword({ email, password });
-      if (error || !data.session) {
-        throw new Error(error?.message ?? 'Login failed');
+      // Backend-mediated sign-in: usernames are resolved to emails server-side.
+      const res = await fetch(`${BASE_URL}/auth/signin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: email, password }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        const detail = errBody.detail || errBody.message || 'Login failed';
+        throw new Error(typeof detail === 'string' ? detail : 'Login failed');
       }
-      const usr = toUser(data.session.user);
+      const auth = await res.json();
+      // Install the session into the Supabase client so token refresh in
+      // services/http.ts keeps working transparently.
+      await getSupabase().auth.setSession({
+        access_token: auth.access_token,
+        refresh_token: auth.refresh_token,
+      });
+      const usr = toUser(auth.user);
       set({
         user: usr,
-        accessToken: data.session.access_token,
+        accessToken: auth.access_token,
         isAuthenticated: true,
         hydrated: true,
         fullName: usr.name,
@@ -135,7 +159,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signUp: async (fullName, email, password) => {
+  signUp: async (fullName, email, password, username) => {
     if (USE_MOCK) {
       const mockUser: User = {
         id: `USR-SIGNUP-${Date.now()}`,
@@ -157,23 +181,34 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return { confirmationPending: false };
     }
 
-    const { data, error } = await getSupabase().auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
+    // Backend-mediated signup: enforces username uniqueness and creates the
+    // project user row with the chosen username.
+    const res = await fetch(`${BASE_URL}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, username, full_name: fullName || undefined }),
     });
-    if (error) throw new Error(error.message);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const detail = errBody.detail || errBody.message || 'Signup failed';
+      throw new Error(typeof detail === 'string' ? detail : 'Signup failed');
+    }
+    const auth = await res.json();
 
-    if (!data.session) {
+    if (auth.confirmation_pending || !auth.session) {
       // Email confirmation is enabled in Supabase: user must confirm before signing in.
       return { confirmationPending: true };
     }
 
-    // Email confirmation disabled: user has active session
-    const usr = toUser(data.session.user);
+    // Email confirmation disabled: install the active session.
+    await getSupabase().auth.setSession({
+      access_token: auth.session.access_token,
+      refresh_token: auth.session.refresh_token,
+    });
+    const usr = toUser(auth.user);
     set({
       user: usr,
-      accessToken: data.session.access_token,
+      accessToken: auth.session.access_token,
       isAuthenticated: true,
       hydrated: true,
       fullName: usr.name,
@@ -241,6 +276,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAuthenticated: false,
       role: 'analyst',
       fullName: null,
+      username: null,
+      orgEnabled: false,
       organizations: [],
       activeOrganization: null,
       activeOrganizationId: null,
@@ -272,12 +309,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       if (res.ok) {
         const data = await res.json();
-        const orgs: Organization[] = data.organizations || [];
+        const orgEnabled = Boolean(data.org_enabled);
+        const orgs: Organization[] = orgEnabled ? data.organizations || [] : [];
         const storedOrgId = localStorage.getItem(ACTIVE_ORG_KEY);
-        const active = orgs.find((o) => o.id === storedOrgId) || (data.active_organization as Organization);
+        const active = orgEnabled
+          ? orgs.find((o) => o.id === storedOrgId) || (data.active_organization as Organization | null)
+          : null;
         const activeRole = (data.active_role || active?.role || 'analyst') as Role;
         set({
+          orgEnabled,
+          username: data.username ?? null,
           organizations: orgs,
+          // Personal mode: no active organization; org rows stay frozen.
           activeOrganization: active || null,
           activeOrganizationId: active?.id ?? null,
           role: activeRole,
@@ -292,6 +335,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
         if (active?.id) {
           localStorage.setItem(ACTIVE_ORG_KEY, active.id);
+        } else if (!orgEnabled) {
+          localStorage.removeItem(ACTIVE_ORG_KEY);
         }
       }
     } catch (err) {

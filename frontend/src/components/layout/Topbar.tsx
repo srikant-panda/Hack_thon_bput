@@ -29,6 +29,7 @@ export default function Topbar() {
   const logout = useAuthStore((s) => s.logout);
   const organizations = useAuthStore((s) => s.organizations);
   const activeOrganization = useAuthStore((s) => s.activeOrganization);
+  const orgEnabled = useAuthStore((s) => s.orgEnabled);
   const switchOrganization = useAuthStore((s) => s.switchOrganization);
 
   const liveSimulation = useUiStore((s) => s.liveSimulation);
@@ -136,15 +137,19 @@ export default function Topbar() {
                 )}
               </div>
 
-              <div className="my-2 border-t border-zinc-800" />
-              <Link
-                to="/organization"
-                onClick={() => setOrgMenuOpen(false)}
-                className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-red-400 transition"
-              >
-                <Users className="h-3.5 w-3.5 text-red-400" />
-                <span>Manage Team & Members</span>
-              </Link>
+              {orgEnabled && (
+                <>
+                  <div className="my-2 border-t border-zinc-800" />
+                  <Link
+                    to="/organization"
+                    onClick={() => setOrgMenuOpen(false)}
+                    className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-red-400 transition"
+                  >
+                    <Users className="h-3.5 w-3.5 text-red-400" />
+                    <span>Manage Team & Members</span>
+                  </Link>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -198,14 +203,16 @@ export default function Topbar() {
                 </div>
               </div>
               <div className="my-1 border-t border-zinc-800" />
-              <Link
-                to="/organization"
-                onClick={() => setMenuOpen(false)}
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-red-400 transition"
-              >
-                <Users className="h-3.5 w-3.5 text-red-400" />
-                <span>Organization Settings</span>
-              </Link>
+              {orgEnabled && (
+                <Link
+                  to="/organization"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-red-400 transition"
+                >
+                  <Users className="h-3.5 w-3.5 text-red-400" />
+                  <span>Organization Settings</span>
+                </Link>
+              )}
               <div className="my-1 border-t border-zinc-800" />
               <button
                 onClick={() => {

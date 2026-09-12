@@ -7,6 +7,7 @@ from typing import Any, Optional
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import TenantContext
 from app.db.models import AuditLog
 
 logger = logging.getLogger("cyberguard.audit")
@@ -15,7 +16,7 @@ logger = logging.getLogger("cyberguard.audit")
 async def log_action(
     db: AsyncSession,
     *,
-    organization_id: Optional[str] = None,
+    tenant: Optional[TenantContext] = None,
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     action: str,
@@ -26,7 +27,8 @@ async def log_action(
     try:
         entry = AuditLog(
             id=str(uuid.uuid4()),
-            organization_id=organization_id,
+            organization_id=tenant.organization_id if tenant else None,
+            owner_user_id=tenant.owner_user_id if tenant else None,
             user_id=user_id,
             user_name=user_name or "System",
             action=action,
@@ -41,14 +43,16 @@ async def log_action(
 
 async def get_audit_logs(
     db: AsyncSession,
-    organization_id: str,
+    tenant: TenantContext,
     limit: int = 100,
     offset: int = 0,
 ) -> list[AuditLog]:
-    """Fetch audit logs scoped to the active organization, newest first."""
+    """Fetch audit logs scoped to the active tenant, newest first."""
+    from app.core.security import tenant_criteria
+
     query = (
         select(AuditLog)
-        .where(AuditLog.organization_id == organization_id)
+        .where(tenant_criteria(AuditLog, tenant))
         .order_by(desc(AuditLog.created_at))
         .offset(offset)
         .limit(limit)

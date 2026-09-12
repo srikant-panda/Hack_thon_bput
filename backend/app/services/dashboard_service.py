@@ -9,6 +9,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.security import TenantContext, tenant_criteria
 from app.db.models import Alert, Event, Incident
 
 logger = logging.getLogger("cyberguard.dashboard")
@@ -114,26 +115,26 @@ def _top_targeted_services(alerts: list[Alert]) -> list[dict[str, Any]]:
     ]
 
 
-async def get_dashboard_summary(db: AsyncSession, organization_id: str) -> dict[str, Any]:
-    """Build the complete dashboard summary for the specified organization."""
+async def get_dashboard_summary(db: AsyncSession, tenant: TenantContext) -> dict[str, Any]:
+    """Build the complete dashboard summary for the active tenant."""
     # Load alerts
     alerts_res = await db.execute(
         select(Alert)
         .options(selectinload(Alert.recommended_actions))
-        .where(Alert.organization_id == organization_id)
+        .where(tenant_criteria(Alert, tenant))
         .order_by(desc(Alert.created_at))
     )
     alerts = list(alerts_res.scalars().all())
 
     # Load events
     events_res = await db.execute(
-        select(Event).where(Event.organization_id == organization_id)
+        select(Event).where(tenant_criteria(Event, tenant))
     )
     events = list(events_res.scalars().all())
 
     # Load incidents
     incidents_res = await db.execute(
-        select(Incident).where(Incident.organization_id == organization_id)
+        select(Incident).where(tenant_criteria(Incident, tenant))
     )
     incidents = list(incidents_res.scalars().all())
 

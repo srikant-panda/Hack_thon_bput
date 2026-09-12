@@ -22,7 +22,7 @@ async def chat_with_assistant(
     """Answer analyst questions grounded in recent organizational alert context."""
     return await assistant_service.chat_with_assistant(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         user_message=payload.message,
         user_id=tenant.user_id,
         user_name=tenant.user_email or tenant.user_id,

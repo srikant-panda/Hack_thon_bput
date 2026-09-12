@@ -8,6 +8,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, PermissionDeniedError
+from app.core.security import TenantContext, tenant_criteria
 from app.db.models import ResponseCatalog, ResponseExecution
 from app.services import audit_service
 
@@ -23,7 +24,7 @@ async def get_response_catalog(db: AsyncSession) -> list[ResponseCatalog]:
 async def execute_response(
     db: AsyncSession,
     *,
-    organization_id: str,
+    tenant: TenantContext,
     catalog_id: str,
     target: Optional[str],
     approved: bool,
@@ -44,7 +45,8 @@ async def execute_response(
 
     execution = ResponseExecution(
         id=str(uuid.uuid4()),
-        organization_id=organization_id,
+        organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         catalog_id=catalog.id,
         action_name=catalog.action,
         target=target,
@@ -58,7 +60,7 @@ async def execute_response(
 
     await audit_service.log_action(
         db,
-        organization_id=organization_id,
+        tenant=tenant,
         user_id=executed_by,
         user_name=executed_by,
         action=f"Response executed: {catalog.action}",
@@ -71,13 +73,13 @@ async def execute_response(
 
 async def get_execution_history(
     db: AsyncSession,
-    organization_id: str,
+    tenant: TenantContext,
     limit: int = 50,
 ) -> list[ResponseExecution]:
-    """Fetch recent response executions scoped to the active organization."""
+    """Fetch recent response executions scoped to the active tenant."""
     query = (
         select(ResponseExecution)
-        .where(ResponseExecution.organization_id == organization_id)
+        .where(tenant_criteria(ResponseExecution, tenant))
         .order_by(desc(ResponseExecution.created_at))
         .limit(limit)
     )

@@ -50,7 +50,7 @@ async def list_incidents(
 ) -> list[dict[str, Any]]:
     """List incidents scoped to the active organization, optionally filtered by status."""
     incidents = await incident_service.list_incidents(
-        db, organization_id=tenant.organization_id, status_filter=status_filter
+        db, tenant=tenant, status_filter=status_filter
     )
     return [_format_incident(inc) for inc in incidents]
 
@@ -63,7 +63,7 @@ async def get_incident(
 ) -> dict[str, Any]:
     """Fetch a single incident with its timeline and linked alerts."""
     incident = await incident_service.get_incident(
-        db, incident_id=incident_id, organization_id=tenant.organization_id
+        db, incident_id=incident_id, tenant=tenant
     )
     return _format_incident(incident)
 
@@ -77,7 +77,7 @@ async def create_incident(
     """Create an incident, optionally linking existing alerts (analysts and admins)."""
     incident = await incident_service.create_incident(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         title=payload.title,
         severity=payload.severity,
         linked_alert_ids=payload.linked_alert_ids,
@@ -97,7 +97,7 @@ async def update_incident_status(
     incident = await incident_service.update_incident_status(
         db,
         incident_id=incident_id,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         new_status=payload.status,
         actor=tenant.user_email or tenant.user_id,
     )
@@ -115,7 +115,7 @@ async def assign_incident(
     incident = await incident_service.assign_incident(
         db,
         incident_id=incident_id,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         assigned_to=payload.assigned_to,
         actor=tenant.user_email or tenant.user_id,
     )
@@ -133,7 +133,7 @@ async def escalate_incident(
     incident = await incident_service.escalate_incident(
         db,
         incident_id=incident_id,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         reason=payload.reason,
         actor=tenant.user_email or tenant.user_id,
     )

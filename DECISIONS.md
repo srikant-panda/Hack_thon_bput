@@ -1,1 +1,72 @@
-Hybrid blending is monotonic: ML can raise but never lower a heuristic score (safety property).
+# DECISIONS
+
+Append-only decision log. Each entry: date, decision, rationale, and
+consequences. Newest entries at the bottom.
+
+---
+
+- **Decision.** Hybrid blending is monotonic: ML can raise but never lower a heuristic score (safety property).
+
+- **2026-09-13 — Dedicated `cyberguard` schema + PostgreSQL RLS as the isolation backbone (Phase -1).**
+  All application tables moved out of `public` into a dedicated `cyberguard`
+  schema, managed by Alembic migrations (introduced this phase; previously
+  schema existed only as `Base.metadata.create_all`). The backend connects as
+  a dedicated `cyberguard_api` role with `NOBYPASSRLS`; row visibility is
+  governed by the `app.user_id` / `request.role` GUCs (session-scoped
+  `set_config`, applied per transaction by an `after_begin` event and reset on
+  session release). Rationale: database-enforced isolation beneath the
+  application filters, so a bug in a query filter cannot leak another user's
+  data. Consequences: migrations are now the schema source of truth
+  (`create_all` remains as checkfirst bootstrap for SQLite tests, which run
+  schema-free via `schema_translate_map`); unauthenticated requests can read
+  nothing from owner tables by construction.
+
+- **2026-09-13 — Owner-scoped tenancy in the active path; organization features frozen, not removed (Phase -1).**
+  Personal workspaces are the active product surface: every request resolves
+  to `TenantContext{organization_id: None, owner_user_id: user.id, role:
+  "admin"}` and all queries filter through `tenant_criteria(model, tenant)`.
+  Organization tables, code paths, and the server-mode integration surface
+  (`routes_integrations`, `enforcement_engine`, `action_executor`) are frozen
+  behind `ORG_ENABLED=false` (501 "coming soon") and reactivate with the later
+  Orgs Phase. Rationale: decouple, don't demolish — the user-only path must
+  not depend on org membership. Consequences: rows created in personal mode
+  carry `organization_id = NULL` plus `owner_user_id`; org-mode data written
+  by integrations without `owner_user_id` stays invisible under RLS until the
+  Orgs Phase revisits policies.
+
+- **2026-09-13 — Deliberate extensions to the Phase -1 spec (documented deviations).**
+  1. **GUC application is lazy (per transaction), not at session acquire.**
+     `get_current_user` depends on `get_db`, so the session exists *before*
+     the user is known; an acquire-time `set_config` would always see NULL.
+     The `after_begin` event applies the GUC at the first execution of every
+     transaction, which also covers the JIT user upsert that must itself pass
+     the `users` RLS policy. `request.role='authenticated'` is set alongside
+     so the app role can read the shared-read tables per spec.
+  2. **Shared-read tables also carry an app-role policy** (`response_catalog`,
+     `organizations`) — otherwise startup seeding of the response catalog and
+     `/auth/me` break under RLS for `cyberguard_api`.
+  3. **`response_executions` received `owner_user_id`** beyond the spec's
+     column list — it is a first-class personal-workspace table and would
+     otherwise be deny-all under RLS.
+  4. **Child/join tables** (`recommended_actions`, `incident_alerts`,
+     `incident_events`, `organization_members`) got EXISTS-on-parent /
+     `user_id` policies — RLS-enabled tables without policies are deny-all.
+  5. **`enforcement_policies.organization_id` made nullable** — personal
+     workspaces own policies directly with `organization_id = NULL`.
+  6. **Migration `0003_rls` creates missing roles** (`cyberguard_api`,
+     `authenticated`) so the chain installs on vanilla PostgreSQL, not only
+     Supabase; the cutover then only sets LOGIN/PASSWORD.
+  7. **Frozen-org 501 uses a dedicated `ComingSoonError` handler** to emit the
+     spec'd `{"detail": "Organization accounts are coming soon."}` envelope
+     while leaving the global error shapes untouched.
+
+- **2026-09-13 — Backend-mediated signup/sign-in with server-enforced usernames (Phase -1).**
+  `POST /auth/signup` and `POST /auth/signin` now proxy Supabase Auth from the
+  backend so `username` (`^[a-z0-9_.]{3,32}$`, DB-unique) can be enforced and
+  resolved server-side (username → email lookup runs on the service-role
+  engine, `app/db/admin.py`, because RLS denies anonymous reads of `users`).
+  The frontend installs the returned session via `supabase.auth.setSession`,
+  keeping the existing token-refresh flow intact. OAuth users get their
+  project row (with an auto-generated unique username) via the JIT upsert in
+  `get_current_user`. Rationale: username uniqueness across auth identities
+  cannot be guaranteed client-side.

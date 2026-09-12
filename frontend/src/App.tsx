@@ -7,6 +7,8 @@ import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import OrganizationManagement from './pages/OrganizationManagement';
 import AdminUsers from './pages/AdminUsers';
+import ComingSoon from './pages/ComingSoon';
+import { useAuthStore } from './store/authStore';
 import Dashboard from './pages/Dashboard';
 import ApprovalQueue from './pages/ApprovalQueue';
 import QuarantineQueue from './pages/QuarantineQueue';
@@ -27,6 +29,17 @@ import ResponseActions from './pages/ResponseActions';
 import AuditLogs from './pages/AuditLogs';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+
+/**
+ * Organization features are frozen server-side (ORG_ENABLED=false). While the
+ * flag is off, org routes render the ComingSoon placeholder instead of the
+ * real pages; they reactivate automatically once the backend flips the flag.
+ */
+function OrgFeature({ children }: { children: React.ReactNode }) {
+  const orgEnabled = useAuthStore((s) => s.orgEnabled);
+  if (!orgEnabled) return <ComingSoon />;
+  return <>{children}</>;
+}
 
 export default function App() {
   return (
@@ -54,13 +67,22 @@ export default function App() {
               </RoleGuard>
             }
           />
-          <Route path="/organization" element={<OrganizationManagement />} />
+          <Route
+            path="/organization"
+            element={
+              <OrgFeature>
+                <OrganizationManagement />
+              </OrgFeature>
+            }
+          />
           <Route
             path="/admin/users"
             element={
-              <RoleGuard minimumRole="admin">
-                <AdminUsers />
-              </RoleGuard>
+              <OrgFeature>
+                <RoleGuard minimumRole="admin">
+                  <AdminUsers />
+                </RoleGuard>
+              </OrgFeature>
             }
           />
           <Route path="/phishing" element={<PhishingAnalysis />} />

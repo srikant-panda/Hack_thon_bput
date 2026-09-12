@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ValidationError
-from app.core.security import TenantContext, require_role
+from app.core.security import TenantContext, require_role, tenant_criteria
 from app.core.storage import (
     MAX_MEDIA_SIZE_BYTES,
     SIGNED_URL_EXPIRY_SECONDS,
@@ -34,7 +34,7 @@ MEDIA_SOURCE = "media_upload"
 async def _insert_event(
     db: AsyncSession,
     *,
-    organization_id: str,
+    tenant: TenantContext,
     created_by: str,
     event_type: str,
     source: str,
@@ -44,7 +44,8 @@ async def _insert_event(
     event_id = str(uuid.uuid4())
     event = Event(
         id=event_id,
-        organization_id=organization_id,
+        organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         event_type=event_type,
         source=source,
         raw_data=raw_data,
@@ -64,7 +65,7 @@ async def _ingest_payload(
     """Persist a validated payload as a raw event and return the response."""
     event_id = await _insert_event(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         created_by=tenant.user_id,
         event_type=payload.event_type,
         source=payload.source,
@@ -142,6 +143,7 @@ async def ingest_media_event(
     event = Event(
         id=event_id,
         organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         event_type="deepfake_media",
         source=MEDIA_SOURCE,
         raw_data={
@@ -168,6 +170,7 @@ async def ingest_media_event(
     media_entry = MediaFile(
         id=str(uuid.uuid4()),
         event_id=event_id,
+        owner_user_id=tenant.owner_user_id,
         file_name=media_record["file_name"],
         storage_path=media_record["storage_path"],
         file_type=media_record["file_type"],
@@ -200,7 +203,7 @@ async def get_media_url(
     query = (
         select(MediaFile)
         .join(Event, Event.id == MediaFile.event_id)
-        .where(MediaFile.event_id == event_id, Event.organization_id == tenant.organization_id)
+        .where(MediaFile.event_id == event_id, tenant_criteria(MediaFile, tenant))
     )
     result = await db.execute(query)
     media_file = result.scalar_one_or_none()

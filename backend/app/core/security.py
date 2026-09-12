@@ -1,11 +1,15 @@
 """Authentication and Role-Based Access Control (RBAC) with Multi-Tenancy.
 
-Supports both:
-1. Single-User Mode: Users access their personal workspace with full admin privileges.
-2. Organization Mode: Teams with role-based permissions (admin, analyst, viewer).
+Phase -1 (user-only foundation):
+1. Personal (single-user) mode is the active path: every row is owner-scoped
+   via ``owner_user_id`` and PostgreSQL row-level security keyed on the
+   ``app.user_id`` GUC.
+2. Organization mode is frozen behind ``ORG_ENABLED`` (default False); the
+   org tables and code paths below are kept intact for the later Orgs Phase.
 """
 
 import logging
+import re
 import uuid
 from typing import Callable, Optional
 
@@ -17,13 +21,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from supabase import Client, create_client
 
 from app.core.config import get_settings
-from app.core.errors import AppError, NotFoundError, PermissionDeniedError
+from app.core.errors import ComingSoonError, NotFoundError, PermissionDeniedError
 from app.db.models import Organization, OrganizationMember, User
-from app.db.session import get_db
+from app.db.session import current_user_id, get_db
 
 logger = logging.getLogger("cyberguard.security")
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+USERNAME_PATTERN = re.compile(r"^[a-z0-9_.]{3,32}$")
+
+ORG_COMING_SOON = "Organization accounts are coming soon."
 
 
 class CurrentUser(BaseModel):
@@ -32,25 +40,77 @@ class CurrentUser(BaseModel):
     id: str
     email: Optional[str] = None
     full_name: Optional[str] = None
+    username: Optional[str] = None
+    account_type: str = "user"
 
 
 class TenantContext(BaseModel):
-    """Context defining the active user, active organization, and user's role."""
+    """Context defining the active user, active organization, and user's role.
+
+    Personal workspaces carry ``organization_id = None`` and scope all data by
+    ``owner_user_id`` instead.
+    """
 
     user_id: str
     user_email: Optional[str] = None
-    organization_id: str
-    organization_name: str
-    role: str  # 'admin', 'analyst', 'viewer'
+    # Owner scope for personal workspaces; defaults keep hand-built contexts
+    # (tests, scripts) valid. _personal_tenant always sets it to user_id.
+    owner_user_id: str = ""
+    organization_id: Optional[str] = None
+    organization_name: str = "Personal Workspace"
+    role: str  # 'admin' | 'analyst' | 'viewer'
     is_single_user: bool  # True when accessing personal workspace
 
     model_config = {"arbitrary_types_allowed": True}
+
+
+def tenant_criteria(model, tenant: TenantContext):
+    """SQLAlchemy filter scoping ``model`` rows to the active tenant.
+
+    Personal tenants filter by ``owner_user_id``; organization tenants (frozen
+    until the Orgs Phase) filter by ``organization_id``.
+    """
+    if tenant.organization_id is None:
+        return model.owner_user_id == tenant.owner_user_id
+    return model.organization_id == tenant.organization_id
+
+
+def require_org_enabled() -> Callable:
+    """Dependency freezing organization endpoints until the Orgs Phase."""
+
+    async def _check() -> None:
+        if not get_settings().ORG_ENABLED:
+            raise ComingSoonError(ORG_COMING_SOON)
+
+    return _check
 
 
 def _get_anon_client() -> Client:
     """Create a Supabase client with the anon key for token verification."""
     settings = get_settings()
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
+
+
+def _sanitize_username_prefix(raw: str) -> str:
+    prefix = re.sub(r"[^a-z0-9_.]", "", (raw or "").lower())
+    return prefix[:32]
+
+
+async def _generate_unique_username(db: AsyncSession, email: Optional[str], user_id: str) -> str:
+    """Generate a unique username from the email prefix (clash → '-2', '-3', ...).
+
+    Uniqueness is checked via the service-role lookup because RLS on ``users``
+    hides other accounts from the app-role session; the DB unique constraint
+    remains the final enforcement.
+    """
+    from app.db.admin import is_username_taken
+
+    base = _sanitize_username_prefix((email or "").split("@")[0]) or "user"
+    for suffix in ["", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"]:
+        candidate = f"{base}{suffix}"
+        if not await is_username_taken(candidate):
+            return candidate
+    return f"user-{uuid.uuid4().hex[:8]}"
 
 
 async def get_current_user(
@@ -93,6 +153,11 @@ async def get_current_user(
             logger.warning("Token verification failed: %s", exc)
             raise PermissionDeniedError("Invalid or expired authentication token")
 
+    # Publish the verified identity for the row-level-security GUC. This must
+    # happen before any SQL runs on the request's session (the session was
+    # acquired before this dependency executed).
+    current_user_id.set(user_id)
+
     # Upsert user in database: check by ID or email
     user_query = await db.execute(select(User).where(User.id == user_id))
     user = user_query.scalar_one_or_none()
@@ -101,46 +166,49 @@ async def get_current_user(
         user = email_query.scalar_one_or_none()
 
     if user is None:
+        # OAuth / first-login JIT row: auto-generate a unique username.
+        username = await _generate_unique_username(db, email, user_id)
         user = User(
             id=user_id,
             email=email,
+            username=username,
+            account_type="user",
             full_name=full_name,
             is_single_user=True,
         )
         db.add(user)
         await db.commit()
         await db.refresh(user)
-
-        # Ensure user has a personal workspace organization
-        personal_slug = f"personal-{user.id[:8]}"
-        personal_org = Organization(
-            id=str(uuid.uuid4()),
-            name="Personal Workspace",
-            slug=personal_slug,
-            is_personal=True,
-            owner_id=user.id,
-        )
-        db.add(personal_org)
-        await db.flush()
-
-        # Add member entry as admin of personal workspace
-        member = OrganizationMember(
-            id=str(uuid.uuid4()),
-            organization_id=personal_org.id,
-            user_id=user.id,
-            role="admin",
-        )
-        db.add(member)
-        user.active_organization_id = personal_org.id
-        await db.commit()
     else:
         if not user.email and email:
             user.email = email
         if not user.full_name and full_name:
             user.full_name = full_name
+        if not user.username and email:
+            # Pre-phase rows created before usernames existed.
+            user.username = await _generate_unique_username(db, email, user.id)
+        user.is_single_user = True
         await db.commit()
 
-    return CurrentUser(id=user.id, email=user.email, full_name=user.full_name)
+    return CurrentUser(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        username=user.username,
+        account_type=user.account_type or "user",
+    )
+
+
+async def _personal_tenant(user: CurrentUser) -> TenantContext:
+    return TenantContext(
+        user_id=user.id,
+        user_email=user.email,
+        owner_user_id=user.id,
+        organization_id=None,
+        organization_name="Personal Workspace",
+        role="admin",
+        is_single_user=True,
+    )
 
 
 async def get_tenant_context(
@@ -149,7 +217,14 @@ async def get_tenant_context(
     x_organization_id: Optional[str] = Header(None),
     org_id: Optional[str] = Query(None),
 ) -> TenantContext:
-    """Resolve the active organization and user's role for the request."""
+    """Resolve the active tenant for the request.
+
+    With ``ORG_ENABLED=False`` (default) every request resolves to the user's
+    personal workspace; organization resolution is frozen until the Orgs Phase.
+    """
+    if not get_settings().ORG_ENABLED:
+        return await _personal_tenant(user)
+
     target_org_id = x_organization_id or org_id
 
     # 1. If a specific organization was requested
@@ -176,13 +251,14 @@ async def get_tenant_context(
         return TenantContext(
             user_id=user.id,
             user_email=user.email,
+            owner_user_id=organization.owner_id,
             organization_id=organization.id,
             organization_name=organization.name,
             role=role,
             is_single_user=organization.is_personal,
         )
 
-    # 2. Look for user's active organization or personal workspace
+    # 2. Look for user's active organization
     user_db_query = await db.execute(select(User).where(User.id == user.id))
     user_db = user_db_query.scalar_one()
 
@@ -204,52 +280,16 @@ async def get_tenant_context(
                 return TenantContext(
                     user_id=user.id,
                     user_email=user.email,
+                    owner_user_id=organization.owner_id,
                     organization_id=organization.id,
                     organization_name=organization.name,
                     role=role,
                     is_single_user=organization.is_personal,
                 )
 
-    # 3. Fallback to personal workspace
-    personal_org_query = await db.execute(
-        select(Organization).where(
-            and_(
-                Organization.owner_id == user.id,
-                Organization.is_personal.is_(True),
-            )
-        )
-    )
-    personal_org = personal_org_query.scalars().first()
-    if personal_org is None:
-        personal_org = Organization(
-            id=str(uuid.uuid4()),
-            name="Personal Workspace",
-            slug=f"personal-{user.id[:8]}",
-            is_personal=True,
-            owner_id=user.id,
-        )
-        db.add(personal_org)
-        await db.flush()
-        db.add(
-            OrganizationMember(
-                id=str(uuid.uuid4()),
-                organization_id=personal_org.id,
-                user_id=user.id,
-                role="admin",
-            )
-        )
-        user_db.active_organization_id = personal_org.id
-        await db.commit()
-        await db.refresh(personal_org)
-
-    return TenantContext(
-        user_id=user.id,
-        user_email=user.email,
-        organization_id=personal_org.id,
-        organization_name=personal_org.name,
-        role="admin",
-        is_single_user=True,
-    )
+    # 3. Fallback to personal workspace (no organization row is created; org
+    # tables stay frozen until the Orgs Phase).
+    return await _personal_tenant(user)
 
 
 def require_role(allowed_roles: list[str]) -> Callable:

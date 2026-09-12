@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import TenantContext, require_role
+from app.core.security import TenantContext, require_role, tenant_criteria
 from app.db.models import EnforcementPolicy
 from app.db.session import get_db
 from app.services.audit_service import log_action
@@ -127,9 +127,7 @@ async def list_policies(
 ) -> PolicyListResponse:
     """List all enforcement policies for the organization."""
     result = await db.execute(
-        select(EnforcementPolicy).where(
-            EnforcementPolicy.organization_id == tenant.organization_id
-        )
+        select(EnforcementPolicy).where(tenant_criteria(EnforcementPolicy, tenant))
     )
     policies = result.scalars().all()
 
@@ -148,7 +146,7 @@ async def get_policy(
     tenant: TenantContext = Depends(require_role(["admin", "analyst", "viewer"])),
 ) -> PolicyResponse:
     """Get a single enforcement policy."""
-    policy = await _get_policy_or_404(db, policy_id, tenant.organization_id)
+    policy = await _get_policy_or_404(db, policy_id, tenant)
     return _to_response(policy)
 
 
@@ -160,7 +158,7 @@ async def update_policy(
     tenant: TenantContext = Depends(require_role(["admin"])),
 ) -> PolicyResponse:
     """Update an enforcement policy (org admins only)."""
-    policy = await _get_policy_or_404(db, policy_id, tenant.organization_id)
+    policy = await _get_policy_or_404(db, policy_id, tenant)
 
     update_data = request.model_dump(exclude_unset=True)
 
@@ -182,7 +180,7 @@ async def update_policy(
 
     await log_action(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         user_id=tenant.user_id,
         user_name=tenant.user_email,
         action="update_enforcement_policy",
@@ -203,11 +201,11 @@ async def activate_policy(
     """Activate a policy (deactivates all others for the org).
 
     Only one policy can be active per organization at a time."""
-    policy = await _get_policy_or_404(db, policy_id, tenant.organization_id)
+    policy = await _get_policy_or_404(db, policy_id, tenant)
 
     result = await db.execute(
         select(EnforcementPolicy).where(
-            EnforcementPolicy.organization_id == tenant.organization_id,
+            tenant_criteria(EnforcementPolicy, tenant),
             EnforcementPolicy.id != policy_id,
         )
     )
@@ -221,7 +219,7 @@ async def activate_policy(
 
     await log_action(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         user_id=tenant.user_id,
         user_name=tenant.user_email,
         action="activate_enforcement_policy",
@@ -237,12 +235,12 @@ async def activate_policy(
 
 
 async def _get_policy_or_404(
-    db: AsyncSession, policy_id: str, organization_id: str
+    db: AsyncSession, policy_id: str, tenant: TenantContext
 ) -> EnforcementPolicy:
     result = await db.execute(
         select(EnforcementPolicy).where(
             EnforcementPolicy.id == policy_id,
-            EnforcementPolicy.organization_id == organization_id,
+            tenant_criteria(EnforcementPolicy, tenant),
         )
     )
     policy = result.scalars().first()

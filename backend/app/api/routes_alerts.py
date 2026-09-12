@@ -22,7 +22,7 @@ async def list_alerts(
     """List alerts scoped to the active organization with optional filters and search."""
     return await alert_service.list_alerts(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         severity=params.severity,
         module=params.module,
         status=params.status,
@@ -39,7 +39,7 @@ async def get_alert(
     tenant: TenantContext = Depends(require_role(["admin", "analyst", "viewer"])),
 ) -> Any:
     """Fetch a single alert with its recommended actions scoped to the active organization."""
-    return await alert_service.get_alert(db, alert_id=alert_id, organization_id=tenant.organization_id)
+    return await alert_service.get_alert(db, alert_id=alert_id, tenant=tenant)
 
 
 @router.patch("/{alert_id}/status", response_model=AlertResponse)
@@ -53,7 +53,7 @@ async def update_alert_status(
     return await alert_service.update_alert_status(
         db,
         alert_id=alert_id,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         new_status=payload.status,
         actor=tenant.user_email or tenant.user_id,
     )

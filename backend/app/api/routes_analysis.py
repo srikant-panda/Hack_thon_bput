@@ -25,7 +25,7 @@ from app.ai.prompt_templates import (
     format_url_user_prompt,
 )
 from app.core.errors import NotFoundError, ValidationError
-from app.core.security import TenantContext, require_role
+from app.core.security import TenantContext, require_role, tenant_criteria
 from app.core.storage import (
     MAX_MEDIA_SIZE_BYTES,
     download_media,
@@ -84,7 +84,7 @@ class NetworkAnalysisRequest(BaseModel):
 async def _create_analysis_event(
     db: AsyncSession,
     *,
-    organization_id: str,
+    tenant: TenantContext,
     created_by: str,
     event_type: str,
     source: str,
@@ -94,7 +94,8 @@ async def _create_analysis_event(
     event_id = str(uuid.uuid4())
     event = Event(
         id=event_id,
-        organization_id=organization_id,
+        organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         event_type=event_type,
         source=source,
         raw_data=raw_data,
@@ -121,7 +122,7 @@ async def _run_analysis_pipeline(
     """Shared async detection pipeline: persist event, score, explain, alert."""
     event_id = await _create_analysis_event(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         created_by=tenant.user_id,
         event_type=event_type,
         source=source,
@@ -148,7 +149,7 @@ async def _run_analysis_pipeline(
 
     alert = await create_alert(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         created_by=tenant.user_id,
         event_id=event_id,
         module=module,
@@ -368,7 +369,7 @@ async def analyze_media_upload(
 
     alert = await create_alert(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         created_by=tenant.user_id,
         event_id=event_id,
         module="deepfake",
@@ -414,7 +415,7 @@ async def analyze_media_event(
     query = (
         select(MediaFile)
         .join(Event, Event.id == MediaFile.event_id)
-        .where(MediaFile.event_id == event_id, Event.organization_id == tenant.organization_id)
+        .where(MediaFile.event_id == event_id, tenant_criteria(MediaFile, tenant))
     )
     result = await db.execute(query)
     media = result.scalar_one_or_none()
@@ -444,7 +445,7 @@ async def analyze_media_event(
 
     alert = await create_alert(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         created_by=tenant.user_id,
         event_id=event_id,
         module="deepfake",

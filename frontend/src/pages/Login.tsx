@@ -1,10 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Loader2, Lock, Mail, Shield, User } from 'lucide-react';
+import { ArrowLeft, AtSign, Building2, CheckCircle2, Clock, Loader2, Lock, Mail, Shield, User } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { isMockMode } from '../services/api';
 
 type Mode = 'signin' | 'signup' | 'forgot';
+type AccountType = 'user' | 'organization';
+
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
+const USERNAME_PATTERN = /^[a-z0-9_.]{3,32}$/;
 
 export default function Login() {
   const navigate = useNavigate();
@@ -22,10 +27,45 @@ export default function Login() {
   const [password, setPassword] = useState('demo1234');
   const [fullName, setFullName] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [accountType, setAccountType] = useState<AccountType>('user');
+  const [username, setUsername] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
+  const [orgName, setOrgName] = useState('');
+  const [orgEmail, setOrgEmail] = useState('');
+  const [orgMessage, setOrgMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<'google' | 'github' | null>(null);
+
+  // Live username availability check (debounced, real backend only).
+  useEffect(() => {
+    if (mode !== 'signup' || accountType !== 'user') return;
+    if (!username) {
+      setUsernameStatus('idle');
+      return;
+    }
+    if (!USERNAME_PATTERN.test(username)) {
+      setUsernameStatus('invalid');
+      return;
+    }
+    if (USE_MOCK) {
+      setUsernameStatus('available');
+      return;
+    }
+    setUsernameStatus('checking');
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/auth/username-available?username=${encodeURIComponent(username)}`);
+        if (!res.ok) throw new Error('unavailable');
+        const data = await res.json();
+        setUsernameStatus(data.available ? 'available' : 'taken');
+      } catch {
+        setUsernameStatus('idle');
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [username, mode, accountType]);
 
   const resetMessages = () => {
     setError(null);
@@ -35,6 +75,7 @@ export default function Login() {
   const switchMode = (newMode: Mode) => {
     resetMessages();
     setMode(newMode);
+    setOrgMessage(null);
   };
 
   const handleSignIn = async () => {
@@ -50,6 +91,18 @@ export default function Login() {
   };
 
   const handleSignUp = async () => {
+    if (accountType === 'organization') {
+      setOrgMessage('Organization accounts are coming soon.');
+      return;
+    }
+    if (!USERNAME_PATTERN.test(username)) {
+      setError('Username must be 3-32 chars: lowercase letters, digits, "_" or "."');
+      return;
+    }
+    if (usernameStatus === 'taken') {
+      setError('Username is already taken');
+      return;
+    }
     if (password.length < 8) {
       setError('Password must be at least 8 characters long');
       return;
@@ -60,7 +113,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const { confirmationPending } = await signUp(fullName.trim(), email, password);
+      const { confirmationPending } = await signUp(fullName.trim(), email, password, username.trim().toLowerCase());
       if (confirmationPending) {
         resetMessages();
         setNotice(
@@ -96,6 +149,10 @@ export default function Login() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     resetMessages();
+    if (accountType === 'organization') {
+      setOrgMessage('Organization accounts are coming soon.');
+      return;
+    }
     if (mode === 'signin') return handleSignIn();
     if (mode === 'signup') return handleSignUp();
     return handleForgot();
@@ -188,6 +245,123 @@ export default function Login() {
             </div>
           )}
 
+          {/* Account type selector (frozen organization accounts) */}
+          {mode !== 'forgot' && (
+            <div className="mb-4 flex rounded-lg bg-zinc-950 p-1 border border-zinc-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setAccountType('user');
+                  setOrgMessage(null);
+                }}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
+                  accountType === 'user' ? 'bg-red-600 text-white shadow' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <User className="h-3.5 w-3.5" /> User
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAccountType('organization');
+                  setError(null);
+                  setNotice(null);
+                }}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
+                  accountType === 'organization' ? 'bg-zinc-700 text-white shadow' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Building2 className="h-3.5 w-3.5" /> Organization
+                <span className="ml-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-zinc-400 ring-1 ring-zinc-700">
+                  Coming soon
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* Organization (coming soon) panel */}
+          {accountType === 'organization' && mode !== 'forgot' ? (
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-4"
+            >
+              <div className="flex items-start gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 p-3">
+                <Clock className="h-4 w-4 flex-shrink-0 text-zinc-400 mt-0.5" />
+                <div>
+                  <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-300">
+                    Organization accounts
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-zinc-400">
+                    Multi-analyzer workspaces with team roles are on the roadmap. Create a user
+                    account today — your data carries over when organizations launch.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500">
+                  Organization Name
+                </label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+                  <input
+                    type="text"
+                    disabled
+                    value={orgName}
+                    onChange={(e) => setOrgName(e.target.value)}
+                    className="w-full cursor-not-allowed rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-500 placeholder-zinc-600 outline-none"
+                    placeholder="Acme Security Team"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500">
+                  Work Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+                  <input
+                    type="email"
+                    disabled
+                    value={orgEmail}
+                    onChange={(e) => setOrgEmail(e.target.value)}
+                    className="w-full cursor-not-allowed rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-500 placeholder-zinc-600 outline-none"
+                    placeholder="soc@acme.com"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500">
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+                  <input
+                    type="password"
+                    disabled
+                    className="w-full cursor-not-allowed rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-500 placeholder-zinc-600 outline-none"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
+
+              {orgMessage && (
+                <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
+                  {orgMessage}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-zinc-700 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-600"
+              >
+                Join Waitlist
+              </button>
+            </form>
+          ) : (
+          <>
           {/* OAuth Buttons (shown for signin & signup) */}
           {mode !== 'forgot' && (
             <>
@@ -261,6 +435,41 @@ export default function Login() {
             {mode === 'signup' && (
               <div>
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">
+                  Username
+                </label>
+                <div className="relative">
+                  <AtSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="text"
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-red-500/60 focus:ring-1 focus:ring-red-500/40"
+                    placeholder="alex.mercer"
+                  />
+                </div>
+                {usernameStatus === 'checking' && (
+                  <p className="mt-1 font-mono text-[10px] text-zinc-500">Checking availability...</p>
+                )}
+                {usernameStatus === 'available' && (
+                  <p className="mt-1 flex items-center gap-1 font-mono text-[10px] text-emerald-400">
+                    <CheckCircle2 className="h-3 w-3" /> {username} is available
+                  </p>
+                )}
+                {usernameStatus === 'taken' && (
+                  <p className="mt-1 font-mono text-[10px] text-red-400">{username} is already taken</p>
+                )}
+                {usernameStatus === 'invalid' && (
+                  <p className="mt-1 font-mono text-[10px] text-zinc-500">
+                    3-32 chars: lowercase letters, digits, "_" or "."
+                  </p>
+                )}
+              </div>
+            )}
+
+            {mode === 'signup' && (
+              <div>
+                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">
                   Full Name
                 </label>
                 <div className="relative">
@@ -279,17 +488,17 @@ export default function Login() {
 
             <div>
               <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-400">
-                Email Address
+                {mode === 'signin' ? 'Email or Username' : 'Email Address'}
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
                 <input
-                  type="email"
+                  type={mode === 'signin' ? 'text' : 'email'}
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-red-500/60 focus:ring-1 focus:ring-red-500/40"
-                  placeholder="analyst@cyberguard.local"
+                  placeholder={mode === 'signin' ? 'you@company.com or alex.mercer' : 'analyst@cyberguard.local'}
                 />
               </div>
             </div>
@@ -381,6 +590,8 @@ export default function Login() {
                 <span className="text-red-400 font-semibold">demo1234</span>
               </p>
             </div>
+          )}
+          </>
           )}
 
           {mode === 'forgot' && (

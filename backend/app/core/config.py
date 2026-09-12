@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./cyberguard.db"
+    # Service-role DSN used by Alembic migrations (bypasses RLS).
+    # Falls back to DATABASE_URL when empty.
+    MIGRATION_DATABASE_URL: str = ""
+
+    # Organization accounts are frozen ("coming soon") until the Orgs Phase.
+    ORG_ENABLED: bool = False
 
     # Multi-Provider Orchestration (Groq, Gemini, OpenRouter)
     LLM_PROVIDERS: str = "groq,gemini,openrouter"

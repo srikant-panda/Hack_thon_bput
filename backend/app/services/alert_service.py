@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.errors import NotFoundError
+from app.core.security import TenantContext, tenant_criteria
 from app.db.models import Alert, Event, RecommendedAction, ResponseCatalog
 
 logger = logging.getLogger("cyberguard.alerts")
@@ -42,7 +43,7 @@ def _clean_priority(value: Any, fallback: str = "low") -> str:
 async def create_alert(
     db: AsyncSession,
     *,
-    organization_id: str,
+    tenant: TenantContext,
     event_id: Optional[str],
     module: str,
     raw_data: dict[str, Any],
@@ -61,7 +62,8 @@ async def create_alert(
 
     alert = Alert(
         id=alert_id,
-        organization_id=organization_id,
+        organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         event_id=event_id,
         title=title,
         module=module,
@@ -129,12 +131,12 @@ async def create_alert(
     return result.scalar_one()
 
 
-async def get_alert(db: AsyncSession, alert_id: str, organization_id: str) -> Alert:
-    """Fetch an alert by ID scoped to the active organization."""
+async def get_alert(db: AsyncSession, alert_id: str, tenant: TenantContext) -> Alert:
+    """Fetch an alert by ID scoped to the active tenant."""
     query = (
         select(Alert)
         .options(selectinload(Alert.recommended_actions))
-        .where(Alert.id == alert_id, Alert.organization_id == organization_id)
+        .where(Alert.id == alert_id, tenant_criteria(Alert, tenant))
     )
     result = await db.execute(query)
     alert = result.scalar_one_or_none()
@@ -146,7 +148,7 @@ async def get_alert(db: AsyncSession, alert_id: str, organization_id: str) -> Al
 async def list_alerts(
     db: AsyncSession,
     *,
-    organization_id: str,
+    tenant: TenantContext,
     severity: Optional[str] = None,
     module: Optional[str] = None,
     status: Optional[str] = None,
@@ -154,11 +156,11 @@ async def list_alerts(
     offset: int = 0,
     limit: int = 50,
 ) -> list[Alert]:
-    """List alerts scoped to an organization with filters and search."""
+    """List alerts scoped to the active tenant with filters and search."""
     query = (
         select(Alert)
         .options(selectinload(Alert.recommended_actions))
-        .where(Alert.organization_id == organization_id)
+        .where(tenant_criteria(Alert, tenant))
     )
 
     if severity:
@@ -185,14 +187,14 @@ async def list_alerts(
 async def update_alert_status(
     db: AsyncSession,
     alert_id: str,
-    organization_id: str,
+    tenant: TenantContext,
     new_status: str,
     actor: str = "analyst",
 ) -> Alert:
     """Update status of an alert with audit logging."""
     from app.services import audit_service
 
-    alert = await get_alert(db, alert_id, organization_id)
+    alert = await get_alert(db, alert_id, tenant)
     old_status = alert.status
     alert.status = new_status
     await db.commit()
@@ -200,7 +202,7 @@ async def update_alert_status(
 
     await audit_service.log_action(
         db,
-        organization_id=organization_id,
+        tenant=tenant,
         user_id=actor,
         user_name=actor,
         action="Alert status updated",

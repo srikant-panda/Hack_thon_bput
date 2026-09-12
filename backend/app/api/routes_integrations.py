@@ -137,7 +137,7 @@ async def _run_integration_pipeline(
 
     alert = await create_alert(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         created_by=tenant.user_id,
         event_id=event.id,
         module=module,

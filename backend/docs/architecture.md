@@ -103,11 +103,74 @@ Every state-changing action (alert status change, incident create/assign/escalat
 
 ## Security Model
 
+### Dedicated schema, tenancy, and RLS (Phase -1)
+
+All application tables live in a dedicated **`cyberguard`** PostgreSQL schema
+(never `public`). Migrations are managed by **Alembic** (`backend/alembic/`,
+async template); `alembic/env.py` reads `MIGRATION_DATABASE_URL` (service /
+postgres role, RLS-bypassing) falling back to `DATABASE_URL`. SQLite (tests,
+local dev) resolves the schema prefix to the default schema via
+`schema_translate_map={"cyberguard": None}` on the engine (`app/db/session.py`),
+so the full suite runs unchanged without PostgreSQL.
+
+**Tenancy.** With `ORG_ENABLED=false` (the default), every request resolves to
+a *personal* tenant: `TenantContext { organization_id: None, owner_user_id:
+user.id, role: "admin" }`. All queries are scoped through
+`tenant_criteria(model, tenant)` (`app/core/security.py`): personal tenants
+filter `owner_user_id == tenant.owner_user_id`; organization tenants (frozen
+until the Orgs Phase) filter `organization_id == tenant.organization_id`.
+Organization endpoints (`/organizations/*`, `/auth/switch-org`) are frozen
+behind `require_org_enabled` → `HTTP 501 {"detail": "Organization accounts are
+coming soon."}`. The server-mode integration surface
+(`app/api/routes_integrations.py`) remains organization-scoped and therefore
+inactive for personal users; it reactivates unchanged with the Orgs Phase
+(alongside `enforcement_engine.py` / `action_executor.py`, which stay
+org-scoped).
+
+**Row-Level Security.** RLS is enabled on every `cyberguard` table:
+
+- *Owner-scoped tables* (`events`, `alerts`, `action_executions`,
+  `enforcement_policies`, `audit_logs`, `media_files`, `incidents`,
+  `response_executions`, `users`): split SELECT/INSERT/UPDATE/DELETE policies
+  on `owner_user_id = current_setting('app.user_id', true)::text` (`users`
+  keys on `id`), with `WITH CHECK` on writes.
+- *Shared read tables* (`response_catalog`, `organizations`): SELECT for the
+  Supabase `authenticated` role via `current_setting('request.role', true) =
+  'authenticated'`, plus full access for `cyberguard_api` (startup seeding,
+  org resolution).
+- *Child/join tables* (`recommended_actions`, `incident_alerts`,
+  `incident_events`, `organization_members`): ownership derived from the
+  parent row via `EXISTS` predicates.
+
+**GUC wiring.** The backend connects as `cyberguard_api` (`NOBYPASSRLS`); it
+can only see rows the GUCs permit. `current_user_id` (`ContextVar`,
+`app/db/session.py`) is set by `get_current_user` immediately after token
+verification — before any SQL runs, including the JIT user upsert. A session
+`after_begin` event stamps `set_config('app.user_id', ..., false)` +
+`set_config('request.role', 'authenticated', false)` onto every new
+transaction (PostgreSQL only), surviving mid-request commits; `get_db` resets
+the GUCs on session release. Unauthenticated requests run with an empty GUC
+and therefore see nothing. The only pre-auth database operations are
+username-availability and username→email lookups at sign-in, which run on a
+separate service-role engine (`app/db/admin.py`).
+
+**Auth paths.** `POST /auth/signup` creates the Supabase auth identity and the
+project user row atomically, enforcing `username` (`^[a-z0-9_.]{3,32}$`,
+DB-unique) and `account_type='user'`. `POST /auth/signin` accepts email *or*
+username (usernames are resolved server-side). OAuth (Google/GitHub) sign-ins
+materialize their project row in `get_current_user`'s JIT upsert with an
+auto-generated unique username (sanitized email prefix, `-2`, `-3`… on clash);
+duplicate identities for the same verified email are impossible because the
+upsert keys on Supabase user id and email. Two Supabase keys remain strictly
+separated (anon = verification, service role = migrations/storage only).
+
+### Original hardening (unchanged)
+
 1. **Two Supabase keys, strictly separated**
    - **Anon key** — public, safe for the browser. Used by the frontend (`src/lib/supabaseClient.ts`) for sign-in/session and by the backend (`app/core/security.py`) only to *verify* user JWTs.
-   - **Service role key** — backend-only (`app/core/supabase_client.py`, `app/core/storage.py`). Bypasses RLS so the detection pipeline can write alerts/actions; never leaves the backend environment and is never committed (`.env` is git-ignored).
-2. **JWT authentication** — every protected route depends on `get_current_user` (`app/core/security.py`), which validates the bearer token with `supabase.auth.get_user(token)` on the anon client and returns the caller's `id`/`email`. Invalid or expired tokens receive `401` with `WWW-Authenticate: Bearer`. The frontend refreshes the session once on a 401 (`src/services/http.ts`) and falls back to sign-out.
-3. **Row Level Security** — `db/schema.sql` enables RLS on all 11 tables. Direct client access (anon key) is restricted: users read their own profile (`auth.uid() = id`), authenticated users can read/write the operational tables, and the service role bypasses RLS for the pipeline. This means a leaked anon key alone cannot tamper with data outside the policies.
+   - **Service role key** — backend-only (`app/core/supabase_client.py`, `app/core/storage.py`); never leaves the backend environment and is never committed (`.env` is git-ignored).
+2. **JWT authentication** — every protected route depends on `get_current_user` (`app/core/security.py`), which validates the bearer token with `supabase.auth.get_user(token)` on the anon client and returns the caller's identity. The frontend refreshes the session once on a 401 (`src/services/http.ts`) and falls back to sign-out.
+3. **Row Level Security** — see above: enforced in the database itself against the `cyberguard_api` role, defense-in-depth beneath the application-level `tenant_criteria` filters.
 4. **Human-in-the-loop response actions** — catalog actions flagged `requires_approval` return HTTP 403 from `POST /responses/execute` unless `approved: true`; every execution (and rejection path) is audit-logged.
 5. **Input hardening** — Pydantic validation returns structured 400s; media uploads are limited to 25 MB (413) and image/video/audio content types; file names are sanitized before storage; LLM output is parsed defensively with a deterministic fallback when OpenRouter fails or returns non-JSON.
 6. **Secrets** — all secrets come from environment variables (backend `.env`, frontend `VITE_*`); `.env.example` files document them without real values.

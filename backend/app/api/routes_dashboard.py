@@ -19,5 +19,5 @@ async def get_dashboard_summary(
 ) -> dict[str, Any]:
     """Return aggregated metrics, attack timeline, and top targets for the active organization."""
     return await dashboard_service.get_dashboard_summary(
-        db, organization_id=tenant.organization_id
+        db, tenant=tenant
     )

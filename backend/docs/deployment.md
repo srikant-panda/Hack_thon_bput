@@ -46,15 +46,39 @@ docker compose up --build
 - **Supabase is external and cloud-hosted** — nothing database/auth/storage related runs in Compose; both services are stateless and can be scaled/restarted freely.
 - Both services share the `cyberguard-net` bridge network.
 
-## 3. Supabase Cloud Configuration (one-time)
+## 3. Supabase Cloud Configuration
+
+### 3.1 Schema (current — `cyberguard` schema + RLS, cutover 2026-09-13)
+
+Schema is managed by **Alembic**, not raw SQL. Full cutover record:
+[schema_cutover.md](schema_cutover.md). Summary for a fresh project:
+
+```bash
+cd backend
+uv add alembic   # already in pyproject
+export MIGRATION_DATABASE_URL="postgresql+asyncpg://postgres:<password>@db.<ref>.supabase.co:5432/postgres"
+uv run alembic upgrade head
+```
+
+Migration `0003_rls` creates the `cyberguard_api` role (NOBYPASSRLS, NOLOGIN)
+and applies all policies; enable login afterwards:
+
+```sql
+ALTER ROLE cyberguard_api WITH LOGIN PASSWORD '<generated-strong-password>';
+```
+
+`DATABASE_URL` must point at the **`cyberguard_api`** role (the backend is
+fully RLS-scoped) and `MIGRATION_DATABASE_URL` at the postgres/service role
+(migrations + RLS tests only). Realtime publication for the `cyberguard`
+schema is deferred to the dashboard phase.
+
+### 3.2 Legacy notes
 
 1. **Create the project** at [supabase.com](https://supabase.com); note the project URL.
-2. **Schema**: open *SQL editor* and execute `backend/db/schema.sql` (creates 7 enums, 11 tables, indexes, RLS policies, the `handle_new_user` trigger and the 10-row `response_catalog` seed).
-3. **Realtime**: enable streaming for alert inserts —
-   `alter publication supabase_realtime add table alerts;`
-4. **Storage**: create a **private** bucket named `cyberguard-media` (Storage → New bucket → Private).
-5. **Auth**: create at least one user (e.g. `admin@cyberguard.local`) under *Authentication → Users*. The `handle_new_user` trigger auto-creates the matching `profiles` row.
-6. **Keys**: copy the Project URL, **anon** key and **service role** key from *Project Settings → API*.
+2. **Realtime**: was enabled for the old `public.alerts` table; the `cyberguard`
+   schema publication arrives with the dashboard phase.
+3. **Storage**: create a **private** bucket named `cyberguard-media` (Storage → New bucket → Private).
+4. **Keys**: copy the Project URL, **anon** key and **service role** key from *Project Settings → API*.
 
 ## 4. Environment Variables
 
@@ -64,7 +88,10 @@ Backend (`backend/.env`, loaded by `app/core/config.py`):
 |---|---|
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Public anon key — used **only** to verify user JWTs (`app/core/security.py`) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Privileged key — all DB/storage writes; **backend-only, never commit** |
+| `SUPABASE_SERVICE_ROLE_KEY` | Privileged key — storage writes only; **backend-only, never commit** |
+| `DATABASE_URL` | Application DSN — the **`cyberguard_api`** role (`NOBYPASSRLS`); every query is RLS-scoped by the `app.user_id` GUC |
+| `MIGRATION_DATABASE_URL` | Service/postgres DSN — Alembic migrations, RLS verification, pre-auth username lookups; falls back to `DATABASE_URL` |
+| `ORG_ENABLED` | Organization accounts flag (default `false` = frozen, endpoints answer 501 coming soon) |
 | `API_V1_PREFIX` | Route prefix (default `/api/v1`) |
 | `CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `OPENROUTER_API_KEY` | OpenRouter key; empty disables LLM and activates the fallback explanation |

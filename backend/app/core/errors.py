@@ -59,6 +59,17 @@ class ExternalServiceError(AppError):
         )
 
 
+class ComingSoonError(StarletteHTTPException):
+    """Frozen-feature marker rendered with the plain FastAPI detail envelope.
+
+    Raised by require_org_enabled: 501 {"detail": "Organization accounts are
+    coming soon."}
+    """
+
+    def __init__(self, message: str):
+        super().__init__(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=message)
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Register unified exception handlers on the FastAPI app."""
 
@@ -115,6 +126,10 @@ def register_error_handlers(app: FastAPI) -> None:
                 "details": exc.detail if not isinstance(exc.detail, str) else None,
             },
         )
+
+    @app.exception_handler(ComingSoonError)
+    async def coming_soon_handler(_request: Request, exc: ComingSoonError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

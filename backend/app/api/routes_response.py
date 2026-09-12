@@ -42,7 +42,7 @@ async def execute_response(
     """Execute (or approve) a catalog response action against a target."""
     return await response_service.execute_response(
         db,
-        organization_id=tenant.organization_id,
+        tenant=tenant,
         catalog_id=payload.catalog_id,
         target=payload.target,
         approved=payload.approved,
@@ -59,5 +59,5 @@ async def get_execution_history(
 ) -> Any:
     """Return recent response executions scoped to the active organization, newest first."""
     return await response_service.get_execution_history(
-        db, organization_id=tenant.organization_id, limit=limit
+        db, tenant=tenant, limit=limit
     )

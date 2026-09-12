@@ -67,8 +67,9 @@ export default function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const setAssistantOpen = useUiStore((s) => s.setAssistantOpen);
   const activeOrganization = useAuthStore((s) => s.activeOrganization);
+  const orgEnabled = useAuthStore((s) => s.orgEnabled);
   const can = useAuthStore((s) => s.can);
-  const isOrgWorkspace = Boolean(activeOrganization && !activeOrganization.is_personal);
+  const isOrgWorkspace = Boolean(orgEnabled && activeOrganization && !activeOrganization.is_personal);
   const isAdmin = can('admin');
 
   // Pending-approval badge for the ORGANIZATION section (polled every 60s)
@@ -135,7 +136,11 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3">
-        {renderItems(NAV_ITEMS)}
+        {renderItems(
+          orgEnabled
+            ? NAV_ITEMS
+            : NAV_ITEMS.filter((item) => item.to !== '/organization'),
+        )}
 
         {isOrgWorkspace && (
           <>

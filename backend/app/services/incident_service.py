@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.errors import NotFoundError, ValidationError
+from app.core.security import TenantContext, tenant_criteria
 from app.db.models import Incident, IncidentAlert, IncidentEvent
 from app.services import audit_service
 
@@ -20,7 +21,7 @@ VALID_STATUSES = {"open", "investigating", "contained", "closed"}
 async def create_incident(
     db: AsyncSession,
     *,
-    organization_id: str,
+    tenant: TenantContext,
     title: str,
     severity: str,
     linked_alert_ids: list[str],
@@ -29,7 +30,8 @@ async def create_incident(
     """Create an incident, link alerts, add a timeline entry, and audit it."""
     incident = Incident(
         id=str(uuid.uuid4()),
-        organization_id=organization_id,
+        organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         title=title,
         severity=severity,
         status="open",
@@ -54,7 +56,7 @@ async def create_incident(
 
     await audit_service.log_action(
         db,
-        organization_id=organization_id,
+        tenant=tenant,
         user_id=created_by,
         user_name=created_by,
         action="Incident created",
@@ -62,15 +64,15 @@ async def create_incident(
         details=f"Incident '{title}' created with severity '{severity}'",
     )
 
-    return await get_incident(db, incident.id, organization_id)
+    return await get_incident(db, incident.id, tenant)
 
 
-async def get_incident(db: AsyncSession, incident_id: str, organization_id: str) -> Incident:
+async def get_incident(db: AsyncSession, incident_id: str, tenant: TenantContext) -> Incident:
     """Fetch an incident with its timeline and linked alerts."""
     query = (
         select(Incident)
         .options(selectinload(Incident.timeline), selectinload(Incident.alert_links))
-        .where(Incident.id == incident_id, Incident.organization_id == organization_id)
+        .where(Incident.id == incident_id, tenant_criteria(Incident, tenant))
     )
     result = await db.execute(query)
     incident = result.scalar_one_or_none()
@@ -81,17 +83,17 @@ async def get_incident(db: AsyncSession, incident_id: str, organization_id: str)
 
 async def list_incidents(
     db: AsyncSession,
-    organization_id: str,
+    tenant: TenantContext,
     status_filter: Optional[str] = None,
 ) -> list[Incident]:
-    """List incidents scoped to an organization, newest activity first."""
+    """List incidents scoped to the active tenant, newest activity first."""
     if status_filter and status_filter not in VALID_STATUSES:
         raise ValidationError(f"Invalid status filter; must be one of {sorted(VALID_STATUSES)}")
 
     query = (
         select(Incident)
         .options(selectinload(Incident.timeline), selectinload(Incident.alert_links))
-        .where(Incident.organization_id == organization_id)
+        .where(tenant_criteria(Incident, tenant))
     )
     if status_filter:
         query = query.where(Incident.status == status_filter)
@@ -104,7 +106,7 @@ async def list_incidents(
 async def update_incident_status(
     db: AsyncSession,
     incident_id: str,
-    organization_id: str,
+    tenant: TenantContext,
     new_status: str,
     actor: str,
 ) -> Incident:
@@ -112,7 +114,7 @@ async def update_incident_status(
     if new_status not in VALID_STATUSES:
         raise ValidationError(f"Invalid status '{new_status}'; must be one of {sorted(VALID_STATUSES)}")
 
-    incident = await get_incident(db, incident_id, organization_id)
+    incident = await get_incident(db, incident_id, tenant)
     incident.status = new_status
 
     timeline_event = IncidentEvent(
@@ -126,24 +128,24 @@ async def update_incident_status(
 
     await audit_service.log_action(
         db,
-        organization_id=organization_id,
+        tenant=tenant,
         user_id=actor,
         user_name=actor,
         action=f"Incident status changed to {new_status}",
         resource=f"incident:{incident_id}",
     )
-    return await get_incident(db, incident_id, organization_id)
+    return await get_incident(db, incident_id, tenant)
 
 
 async def assign_incident(
     db: AsyncSession,
     incident_id: str,
-    organization_id: str,
+    tenant: TenantContext,
     assigned_to: str,
     actor: str,
 ) -> Incident:
     """Assign an incident to an analyst, record timeline entry, and audit it."""
-    incident = await get_incident(db, incident_id, organization_id)
+    incident = await get_incident(db, incident_id, tenant)
     incident.assigned_to = assigned_to
 
     timeline_event = IncidentEvent(
@@ -157,25 +159,25 @@ async def assign_incident(
 
     await audit_service.log_action(
         db,
-        organization_id=organization_id,
+        tenant=tenant,
         user_id=actor,
         user_name=actor,
         action="Incident assigned",
         resource=f"incident:{incident_id}",
         details=f"Assigned to {assigned_to}",
     )
-    return await get_incident(db, incident_id, organization_id)
+    return await get_incident(db, incident_id, tenant)
 
 
 async def escalate_incident(
     db: AsyncSession,
     incident_id: str,
-    organization_id: str,
+    tenant: TenantContext,
     reason: str,
     actor: str,
 ) -> Incident:
     """Escalate an incident to critical severity and audit the action."""
-    incident = await get_incident(db, incident_id, organization_id)
+    incident = await get_incident(db, incident_id, tenant)
     incident.severity = "critical"
 
     timeline_event = IncidentEvent(
@@ -190,11 +192,11 @@ async def escalate_incident(
 
     await audit_service.log_action(
         db,
-        organization_id=organization_id,
+        tenant=tenant,
         user_id=actor,
         user_name=actor,
         action="Incident escalated",
         resource=f"incident:{incident_id}",
         details=reason,
     )
-    return await get_incident(db, incident_id, organization_id)
+    return await get_incident(db, incident_id, tenant)

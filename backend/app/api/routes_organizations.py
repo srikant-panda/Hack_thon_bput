@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
-from app.core.security import CurrentUser, TenantContext, get_current_user, get_tenant_context, require_role
+from app.core.security import (
+    CurrentUser,
+    TenantContext,
+    get_current_user,
+    get_tenant_context,
+    require_org_enabled,
+    require_role,
+)
 from app.db.models import Organization, OrganizationMember, User
 from app.db.session import get_db
 from app.schemas.organizations import (
@@ -21,7 +28,13 @@ from app.schemas.organizations import (
     OrganizationResponse,
 )
 
-router = APIRouter(prefix="/organizations", tags=["Organizations"])
+# Organization accounts are frozen until the Orgs Phase; every endpoint in
+# this router answers 501 "coming soon" while ORG_ENABLED is false.
+router = APIRouter(
+    prefix="/organizations",
+    tags=["Organizations"],
+    dependencies=[Depends(require_org_enabled())],
+)
 
 
 def _slugify(name: str) -> str:

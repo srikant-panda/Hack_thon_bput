@@ -59,21 +59,23 @@ def classify_intent(message: str) -> str:
     return "general_question"
 
 
-async def _load_alerts(db: AsyncSession, organization_id: str, limit: int = 500) -> list[Alert]:
+async def _load_alerts(db: AsyncSession, tenant, limit: int = 500) -> list[Alert]:
+    from app.core.security import tenant_criteria
+
     result = await db.execute(
         select(Alert)
-        .where(Alert.organization_id == organization_id)
+        .where(tenant_criteria(Alert, tenant))
         .order_by(desc(Alert.created_at))
         .limit(limit)
     )
     return list(result.scalars().all())
 
 
-async def _reply_summary(db: AsyncSession, organization_id: str) -> tuple[str, list[str]]:
-    alerts = await _load_alerts(db, organization_id)
+async def _reply_summary(db: AsyncSession, tenant) -> tuple[str, list[str]]:
+    alerts = await _load_alerts(db, tenant)
     ids = [a.id for a in alerts]
     if not alerts:
-        return "No alerts have been recorded for your organization yet. Once detections fire, I can summarize them here.", ids
+        return "No alerts have been recorded for your workspace yet. Once detections fire, I can summarize them here.", ids
 
     severity_counts = Counter(a.severity for a in alerts)
     module_counts = Counter(a.module for a in alerts)
@@ -85,7 +87,7 @@ async def _reply_summary(db: AsyncSession, organization_id: str) -> tuple[str, l
 
     parts = [f"{_c('critical')} critical", f"{_c('high')} high", f"{_c('medium')} medium"]
     return (
-        "Here's the current threat picture for your organization:\n\n"
+        "Here's the current threat picture for your workspace:\n\n"
         f"• {len(alerts)} alerts total\n"
         f"• {', '.join(parts)}\n"
         f"• Top category: {top_module} ({share}% of alerts)\n\n"
@@ -93,10 +95,12 @@ async def _reply_summary(db: AsyncSession, organization_id: str) -> tuple[str, l
     ), ids
 
 
-async def _reply_critical(db: AsyncSession, organization_id: str) -> tuple[str, list[str]]:
+async def _reply_critical(db: AsyncSession, tenant) -> tuple[str, list[str]]:
+    from app.core.security import tenant_criteria
+
     result = await db.execute(
         select(Alert)
-        .where(Alert.organization_id == organization_id, Alert.severity == "critical")
+        .where(tenant_criteria(Alert, tenant), Alert.severity == "critical")
         .order_by(desc(Alert.risk_score))
         .limit(5)
     )
@@ -111,8 +115,8 @@ async def _reply_critical(db: AsyncSession, organization_id: str) -> tuple[str, 
     return "\n".join(lines), ids
 
 
-async def _reply_mitre(db: AsyncSession, organization_id: str) -> tuple[str, list[str]]:
-    alerts = await _load_alerts(db, organization_id)
+async def _reply_mitre(db: AsyncSession, tenant) -> tuple[str, list[str]]:
+    alerts = await _load_alerts(db, tenant)
     technique_counts: Counter[tuple[str, str]] = Counter()
     ids: list[str] = []
     for alert in alerts:
@@ -129,10 +133,12 @@ async def _reply_mitre(db: AsyncSession, organization_id: str) -> tuple[str, lis
     return "\n".join(lines), ids
 
 
-async def _reply_investigate(db: AsyncSession, organization_id: str) -> tuple[str, list[str]]:
+async def _reply_investigate(db: AsyncSession, tenant) -> tuple[str, list[str]]:
+    from app.core.security import tenant_criteria
+
     result = await db.execute(
         select(Alert)
-        .where(Alert.organization_id == organization_id, Alert.status.in_(("new", "acknowledged")))
+        .where(tenant_criteria(Alert, tenant), Alert.status.in_(("new", "acknowledged")))
         .order_by(desc(Alert.risk_score))
         .limit(3)
     )
@@ -148,12 +154,12 @@ async def _reply_investigate(db: AsyncSession, organization_id: str) -> tuple[st
 
 async def _reply_general_question(
     db: AsyncSession,
-    organization_id: str,
+    tenant,
     user_message: str,
 ) -> tuple[str, list[str]]:
     """Free-text questions go to the LLM with org context. The no-key / failed
     fallback is the help menu — never the artifact-analysis heuristic output."""
-    alerts = await _load_alerts(db, organization_id, CONTEXT_ALERT_COUNT)
+    alerts = await _load_alerts(db, tenant, CONTEXT_ALERT_COUNT)
     ids = [a.id for a in alerts]
 
     severity_counts = Counter(a.severity for a in alerts)
@@ -191,12 +197,12 @@ async def _reply_general_question(
 async def chat_with_assistant(
     db: AsyncSession,
     *,
-    organization_id: str,
+    tenant,
     user_message: str,
     user_id: str = "",
     user_name: str = "",
 ) -> dict[str, Any]:
-    """Answer an analyst message with intent routing and org-scoped data."""
+    """Answer an analyst message with intent routing and tenant-scoped data."""
     intent = classify_intent(user_message)
 
     if intent == "greeting":
@@ -204,19 +210,19 @@ async def chat_with_assistant(
     elif intent == "help":
         reply, context_used = HELP_MENU, []
     elif intent == "summarize_threats":
-        reply, context_used = await _reply_summary(db, organization_id)
+        reply, context_used = await _reply_summary(db, tenant)
     elif intent == "critical_alerts":
-        reply, context_used = await _reply_critical(db, organization_id)
+        reply, context_used = await _reply_critical(db, tenant)
     elif intent == "mitre_list":
-        reply, context_used = await _reply_mitre(db, organization_id)
+        reply, context_used = await _reply_mitre(db, tenant)
     elif intent == "investigate_first":
-        reply, context_used = await _reply_investigate(db, organization_id)
+        reply, context_used = await _reply_investigate(db, tenant)
     else:
-        reply, context_used = await _reply_general_question(db, organization_id, user_message)
+        reply, context_used = await _reply_general_question(db, tenant, user_message)
 
     await audit_service.log_action(
         db,
-        organization_id=organization_id,
+        tenant=tenant,
         user_id=user_id,
         user_name=user_name,
         action="SOC Assistant query",

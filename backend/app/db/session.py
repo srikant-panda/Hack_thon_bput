@@ -1,30 +1,72 @@
 """Database engine, session management, and startup initialization."""
 
 import logging
-from typing import AsyncGenerator
+from contextvars import ContextVar
+from typing import AsyncGenerator, Optional
 
-from sqlalchemy import select
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.base import Base
+from app.db.base import SCHEMA, Base
 
 logger = logging.getLogger("cyberguard.db")
 
 settings = get_settings()
 
+# Per-request identity used to satisfy PostgreSQL row-level security via the
+# ``app.user_id`` GUC. Set by app.core.security once the bearer token is
+# verified (which happens *after* get_db has yielded its session, hence the
+# lazy per-transaction application below instead of a set_config at acquire).
+current_user_id: ContextVar[Optional[str]] = ContextVar("current_user_id", default=None)
+
 # Engine creation: supports asyncpg (PostgreSQL) and aiosqlite (SQLite)
 connect_args = {}
-if "sqlite" in settings.async_database_url:
+is_sqlite = "sqlite" in settings.async_database_url
+if is_sqlite:
     connect_args["check_same_thread"] = False
     connect_args["timeout"] = 30
+
+# SQLite has no schema support: every "cyberguard"-qualified table resolves to
+# the default schema so the test suite runs unchanged. PostgreSQL uses the real
+# dedicated schema.
+engine_options = {}
+if is_sqlite:
+    engine_options["execution_options"] = {"schema_translate_map": {SCHEMA: None}}
 
 engine = create_async_engine(
     settings.async_database_url,
     echo=False,
     future=True,
     connect_args=connect_args,
+    **engine_options,
 )
+
+_GUC_SQL = text(
+    "select set_config('app.user_id', :uid, false), set_config('request.role', :role, false)"
+)
+_GUC_RESET_SQL = text(
+    "select set_config('app.user_id', '', false), set_config('request.role', '', false)"
+)
+
+
+def _is_postgres(session: Session) -> bool:
+    bind = session.bind
+    return bind is not None and bind.dialect.name == "postgresql"
+
+
+@event.listens_for(Session, "after_begin")
+def _apply_request_gucs(session: Session, transaction, connection) -> None:
+    """Stamp app.user_id / request.role onto every new transaction (PG only)."""
+    if not _is_postgres(session):
+        return
+    uid = current_user_id.get()
+    connection.execute(
+        _GUC_SQL,
+        {"uid": uid or "", "role": "authenticated" if uid else ""},
+    )
+
 
 async_session_maker = async_sessionmaker(
     engine,
@@ -44,6 +86,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         finally:
+            if _is_postgres(session):
+                try:
+                    await session.execute(_GUC_RESET_SQL)
+                except Exception:  # noqa: S110 - reset is best-effort cleanup
+                    pass
             await session.close()
 
 

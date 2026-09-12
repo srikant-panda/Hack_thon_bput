@@ -73,8 +73,15 @@ async def run_tests():
 
     # -----------------------------------------------------------------------
     # 2. Dynamic Auto-Provisioning & Personal Workspace
+    # (Organization endpoints are frozen behind ORG_ENABLED in the product;
+    #  this suite exercises the frozen org code paths directly, so the flag is
+    #  enabled for the duration of the suite and restored afterwards.)
     # -----------------------------------------------------------------------
-    print("\n[Suite 2] Multi-Tenant Provisioning & Organizations")
+    print("\n[Suite 2] Multi-tenant Provisioning & Organizations")
+    from app.core.config import get_settings
+
+    _org_enabled_backup = get_settings().ORG_ENABLED
+    get_settings().ORG_ENABLED = True
     test_user_id = f"test-usr-{os.urandom(4).hex()}"
     test_email = f"analyst-{test_user_id}@cyberguard.test"
     test_user = CurrentUser(id=test_user_id, email=test_email, full_name="Test SOC Analyst")
@@ -308,6 +315,9 @@ async def run_tests():
     # Clean up overrides
     app.dependency_overrides.clear()
 
+    # Restore the frozen-orgs flag for the remaining suites (product default).
+    get_settings().ORG_ENABLED = _org_enabled_backup
+
     # -----------------------------------------------------------------------
     # 5. Phase 1 — Dual-Mode Foundation (policies, mode detection, enforcement engine)
     # -----------------------------------------------------------------------
@@ -340,6 +350,23 @@ async def run_tests():
     from test_assistant import run_assistant_tests
 
     await run_assistant_tests(runner)
+
+    # -----------------------------------------------------------------------
+    # 9. Phase -1 — User-Only Account Foundation (usernames, frozen orgs,
+    #    owner-scoped tenancy)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 9] Phase -1 — User Foundation (usernames, frozen orgs, owner scoping)")
+    from test_user_foundation import run_user_foundation_tests
+
+    await run_user_foundation_tests(runner)
+
+    # -----------------------------------------------------------------------
+    # 10. Phase -1 — Row-Level Security (PostgreSQL only; skips on SQLite)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 10] Phase -1 — Row-Level Security (PostgreSQL only)")
+    from test_rls_pg import run_rls_tests
+
+    await run_rls_tests(runner)
 
     return runner.report()
 

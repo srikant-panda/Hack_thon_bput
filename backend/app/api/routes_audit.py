@@ -21,7 +21,7 @@ async def get_audit_logs(
 ) -> list[dict[str, Any]]:
     """Return recent audit log entries scoped to the active organization, newest first."""
     logs = await audit_service.get_audit_logs(
-        db, organization_id=tenant.organization_id, limit=limit, offset=offset
+        db, tenant=tenant, limit=limit, offset=offset
     )
     return [
         {
