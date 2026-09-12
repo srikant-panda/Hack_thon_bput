@@ -45,6 +45,9 @@ class TestRunner:
             self.failed += 1
             print(f"  \033[31m✖ FAIL\033[0m: {name} - {details}")
 
+    def skip(self, name: str, reason: str = ""):
+        print(f"  \033[33m⊘ SKIP\033[0m: {name} ({reason})")
+
     def report(self):
         total = self.passed + self.failed
         print("\n" + "=" * 60)
@@ -340,6 +343,14 @@ async def run_tests():
     from test_assistant import run_assistant_tests
 
     await run_assistant_tests(runner)
+
+    # -----------------------------------------------------------------------
+    # 9. ML Integration Gates (blend contract, v2 models, audio LCNN)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 9] ML Integration Gates")
+    from test_ml_gates import run_ml_gate_tests
+
+    run_ml_gate_tests(runner)
 
     return runner.report()
 

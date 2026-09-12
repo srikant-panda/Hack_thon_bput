@@ -94,3 +94,40 @@ When `ML_ENABLED=false` (or a model file is missing), the predictors return `Non
 ## Evaluation evidence
 
 All metrics in this document's companion report are produced by `scripts/evaluate.py` against the labelled datasets (URLhaus, Cisco Umbrella, UCI SMS + seeded synthetic sets and the held-out ML splits) — no metric is invented. Since ML Step 3 the report contains **two passes**: heuristics-only (`ML_ENABLED=false`) and hybrid (0.45/0.55 blend), plus SHA-256 hashes of every artifact. Headline hybrid results: email F1 **0.9867**, url F1 **1.0000** (held-out, small-sample caveat), deepfake F1 **0.9182**; macro accuracy **0.8153** (see `evidence/reports/evaluation.md`).
+
+---
+
+## Trained model cards (2026-09 ML integration)
+
+Model artifact selection is governed by `ml/models/calibration.json` (hot-reloadable via `app/core/calibration.py`). Every trained artifact degrades gracefully: if the file is missing or `ML_ENABLED=false`, the pipeline serves heuristics-only with an explicit indicator — inference never crashes and scores never become fabricated.
+
+### Audio anti-spoofing — LCNN v1 (`audio_cnn_v1.pt`)
+
+- **Architecture:** LCNN/MFM log-Mel CNN over max-2 log-Mel crops per utterance + a 6-dim handcrafted branch (`ml/audio_features.py`, `ml/audio_model.py`; trained by `ml/train_audio_v1.py`).
+- **Training data:** ASVspoof 2019 LA (vocoder/TTS attacks). 6,582 train / 6,550 dev utterances; class-weighted (bonafide/spoof pos_weight 0.654).
+- **Dev metrics:** F1 **0.8517**, accuracy 0.8249, AUC **0.9138** (`ml/models/audio_v1_metrics.json`).
+- **Real-world gate (held out from training):** user-contributed ElevenLabs clip recall **1.00 at max-prob ≥ 0.5** (n=1; mean-prob 0.487 — an honest *transfer* estimate, not an upper bound); real-speech FPR **0.00** (mean and max).
+- **Serving:** `ml_inference.get_audio_model()`; WAV blend `manipulation = 0.6 × model_prob + 0.4 × WAV-heuristic probability`, then the standard monotonic score blend.
+- **Domain-shift caveat:** codec-based neural TTS (e.g. ElevenLabs) is out of the ASVspoof training distribution. The XAI prompt (`format_deepfake_user_prompt`) injects an audio caveat instructing the LLM to state probabilities honestly and require human verification for high-risk audio.
+
+### Image deepfake — CNN v2 (`deepfake_cnn_v2.pt`)
+
+- **Architecture:** MobileNetV3-Small (ImageNet-pretrained), 128×128 input, binary head; single neural artifact (the 32px v1 CNN was retired).
+- **Training data:** GenImage + messenger-degraded variants (`ml/train_deepfake_v2.py`, `ml/degrade_messenger.py`) — 15,700 train images.
+- **Validation:** best F1 **0.9052** (epoch 8/10).
+- **Real-world gates:** real-clean photos FPR **3.76%**, messenger-compressed real photos FPR **2.2%**; per-generator recall: StableDiffusion **91.9%**, Midjourney **74.3%**.
+- **CNN-vs-ELA disagreement policy:** CNN probability below the calibrated real-threshold caps the manipulation score unless ELA confirms a splice (`ml/calibration.json` → `deepfake` section).
+
+### Email phishing — XGBoost v2 (`email_phishing_xgb_v2.pkl` + `email_tfidf_v2.pkl`)
+
+- **Features:** char n-gram (2–4) TF-IDF, multilingual (English + Hindi + Telugu + Odia + romanised; Indic keyword data in `ml/indic_keywords.json`, corpus builder `ml/build_indic_corpus.py`).
+- **Serving:** version-aware loader falls back to v1 artifacts with a logged warning if v2 files are missing.
+
+### Malicious URL — XGBoost v2 (`url_xgb_v2.pkl`)
+
+- **Features (v2):** lexical base (length, Shannon entropy, digit ratio, IP host, '@', suspicious TLD, HTTP scheme, subdomain count) **+ top-1M domain whitelist flag + path-shape vector** (`app/core/url_reputation.py`; whitelist artifact `ml/data/url_whitelist/top1m.txt`, ~26 MB, required at inference).
+- Loader falls back to v1 lexical features/artifact if v2 is unavailable.
+
+### Hybrid blending rule (unchanged, monotonic)
+
+`final_score = max(heuristic_score, round(0.45 × heuristic_score + 0.55 × ml_probability × 100))` — ML can raise but never lower a heuristic verdict. Audio additionally blends model and WAV heuristics 0.6/0.4 before the monotonic blend. The `{"type": "ml_model"}` indicator carries the numeric probability and is split back out by `split_ml_indicator()` so heuristic scores stay well-defined.
