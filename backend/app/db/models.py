@@ -380,6 +380,69 @@ class EnforcementPolicy(Base):
     )
 
 
+class EmailConnectorAccount(Base):
+    __tablename__ = "email_connector_accounts"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "provider", "provider_email", name="uq_connector_owner_provider_email"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)  # gmail | outlook | yahoo | icloud
+    provider_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    # connected | reauth_required | revoked | error
+    status: Mapped[str] = mapped_column(String(32), default="connected", index=True)
+    scopes: Mapped[list[Any]] = mapped_column(PortableJSON, default=list)
+    capabilities: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+
+    # Encrypted at rest (app.core.crypto); never returned by any API.
+    access_token_enc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    refresh_token_enc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    access_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+
+class ConnectorOAuthState(Base):
+    __tablename__ = "connector_oauth_states"
+
+    state: Mapped[str] = mapped_column(String(128), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    redirect_after: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+
+
+class ConnectorOperationLog(Base):
+    __tablename__ = "connector_operation_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    connector_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("email_connector_accounts.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    # authorize | callback | token_refresh | test_connection | disconnect
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    # success | failed | unsupported | insufficient_scope | reauth_required
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    provider_error_code: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provider_error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+
+
 class ActionExecution(Base):
     __tablename__ = "action_executions"
 

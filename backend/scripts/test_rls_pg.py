@@ -130,6 +130,41 @@ async def _owner_isolation(service_url: str, app_url: str) -> None:
     await conn_b.close()
     assert total_b == 0, f"user B must see 0 rows, saw {total_b}"
 
+    # Connector isolation (Phase 1-2): user A inserts a connector account via
+    # the app role; user B must see none of them.
+    engine_a2 = create_async_engine(app_url)
+    async with engine_a2.begin() as conn_a2:
+        await conn_a2.execute(
+            text("select set_config('app.user_id', :uid, false)"),
+            {"uid": user_a},
+        )
+        await conn_a2.execute(
+            text(
+                f"INSERT INTO {SCHEMA}.email_connector_accounts "
+                f"(id, owner_user_id, provider, provider_email, status, scopes, capabilities, created_at, updated_at) "
+                f"VALUES (:id, :uid, 'gmail', :email, 'connected', '{{}}'::jsonb, '{{}}'::jsonb, now(), now())"
+            ),
+            {"id": str(uuid.uuid4()), "uid": user_a, "email": f"{user_a}@gmail.test"},
+        )
+    await engine_a2.dispose()
+
+    _, conn_a = await _as_user(app_url, user_a)
+    count_a_conn = (
+        await conn_a.execute(
+            text(f"SELECT count(*) FROM {SCHEMA}.email_connector_accounts WHERE owner_user_id = :uid"),
+            {"uid": user_a},
+        )
+    ).scalar()
+    await conn_a.close()
+    assert count_a_conn == 1, f"user A expected exactly 1 own connector row, saw {count_a_conn}"
+
+    _, conn_b = await _as_user(app_url, user_b)
+    count_b_conn = (
+        await conn_b.execute(text(f"SELECT count(*) FROM {SCHEMA}.email_connector_accounts"))
+    ).scalar()
+    await conn_b.close()
+    assert count_b_conn == 0, f"user B must see 0 connector rows, saw {count_b_conn}"
+
     # Unauthenticated (empty GUC): 0 rows.
     engine = create_async_engine(app_url)
     async with engine.connect() as conn_anon:
@@ -159,11 +194,11 @@ async def run_rls_tests(runner) -> None:
         return
     try:
         await _owner_isolation(service_url, app_url)
-        runner.assert_true(True, "RLS: A sees own row, B sees none, anon denied, service role bypasses")
+        runner.assert_true(True, "RLS: events + connectors — A sees own rows, B sees none, anon denied, service role bypasses")
     except AssertionError as exc:
-        runner.assert_true(False, "RLS: A sees own row, B sees none, anon denied, service role bypasses", str(exc))
+        runner.assert_true(False, "RLS: events + connectors — A sees own rows, B sees none, anon denied, service role bypasses", str(exc))
     except Exception as exc:  # noqa: BLE001
-        runner.assert_true(False, "RLS: A sees own row, B sees none, anon denied, service role bypasses", f"{type(exc).__name__}: {exc}")
+        runner.assert_true(False, "RLS: events + connectors — A sees own rows, B sees none, anon denied, service role bypasses", f"{type(exc).__name__}: {exc}")
 
 
 async def _standalone() -> int:

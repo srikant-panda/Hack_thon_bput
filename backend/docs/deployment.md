@@ -60,8 +60,9 @@ export MIGRATION_DATABASE_URL="postgresql+asyncpg://postgres:<password>@db.<ref>
 uv run alembic upgrade head
 ```
 
-Migration `0003_rls` creates the `cyberguard_api` role (NOBYPASSRLS, NOLOGIN)
-and applies all policies; enable login afterwards:
+Migrations `0003_rls` (RLS policies) and `0004_email_connectors` (connector
+tables + owner policies) create the `cyberguard_api` role (NOBYPASSRLS,
+NOLOGIN) and apply all policies; enable login afterwards:
 
 ```sql
 ALTER ROLE cyberguard_api WITH LOGIN PASSWORD '<generated-strong-password>';
@@ -92,6 +93,12 @@ Backend (`backend/.env`, loaded by `app/core/config.py`):
 | `DATABASE_URL` | Application DSN — the **`cyberguard_api`** role (`NOBYPASSRLS`); every query is RLS-scoped by the `app.user_id` GUC |
 | `MIGRATION_DATABASE_URL` | Service/postgres DSN — Alembic migrations, RLS verification, pre-auth username lookups; falls back to `DATABASE_URL` |
 | `ORG_ENABLED` | Organization accounts flag (default `false` = frozen, endpoints answer 501 coming soon) |
+| `GOOGLE_GMAIL_CLIENT_ID` / `GOOGLE_GMAIL_CLIENT_SECRET` | CYBERGUARD's own Google OAuth client for Gmail (Supabase Google login is identity-only) |
+| `GOOGLE_GMAIL_REDIRECT_URI` | `http://localhost:8000/api/v1/connectors/gmail/callback` (register in Google Cloud) |
+| `FRONTEND_CONNECTORS_URL` | Where the OAuth callback redirects the browser (default `http://localhost:5173/email-connectors`) |
+| `CONNECTOR_TOKEN_KEY` | Fernet key encrypting Gmail tokens at rest — see `docs/email_connectors.md` for generation |
+| `CONNECTOR_OAUTH_STATE_TTL_SECONDS` | OAuth state lifetime (default 600, single-use) |
+| `GMAIL_CONNECTOR_ENABLED` | Gmail connector flag (default `true`; requires the OAuth client + token key) |
 | `API_V1_PREFIX` | Route prefix (default `/api/v1`) |
 | `CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `OPENROUTER_API_KEY` | OpenRouter key; empty disables LLM and activates the fallback explanation |

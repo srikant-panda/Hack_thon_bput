@@ -39,6 +39,7 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
   { to: '/alerts', label: 'Alerts', icon: Bell },
   { to: '/incidents', label: 'Incidents', icon: ShieldAlert },
   { to: '/response-actions', label: 'Response Actions', icon: Zap },
+  { to: '/email-connectors', label: 'Email Connectors', icon: Mail },
   { to: '/organization', label: 'Organization & Team', icon: Building2 },
   { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText },
   { to: '/reports', label: 'Reports', icon: FileBarChart },

@@ -21,6 +21,7 @@ from app.api import (
     routes_audit,
     routes_auth,
     routes_dashboard,
+    routes_connectors,
     routes_db,
     routes_events,
     routes_health,
@@ -84,6 +85,7 @@ app.include_router(routes_response.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_dashboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_audit.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_assistant.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_connectors.router, prefix=settings.API_V1_PREFIX)
 
 # Register unified exception handlers
 register_error_handlers(app)

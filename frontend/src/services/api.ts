@@ -19,7 +19,10 @@ import type {
   OrganizationMember,
   OrganizationRole,
   UserContext,
-} from '../types';
+
+  EmailConnectorAccount,
+  EmailProviderRegistryEntry,
+  ConnectorOperationLog,} from '../types';
 import * as mockApi from './mockApi';
 import { db, addAuditLog } from './mockData';
 import { ApiError, apiFetch } from './http';
@@ -540,6 +543,88 @@ export async function updateUserRole(
     body: JSON.stringify({ role }),
   });
   return row as AdminUser;
+}
+
+
+// ---------------------------------------------------------------------------
+// Email Connectors (Phase 1-2: Gmail only). Mock mode returns static, honest
+// demo data — never a fake Gmail connection.
+// ---------------------------------------------------------------------------
+
+export async function listConnectorCapabilities(): Promise<EmailProviderRegistryEntry[]> {
+  if (USE_MOCK) {
+    return [
+      {
+        provider: 'gmail',
+        display_name: 'Gmail',
+        status: 'coming_soon',
+        capabilities: null,
+        detail: 'DEMO MODE — connector actions are simulated/unavailable',
+      },
+      {
+        provider: 'outlook',
+        display_name: 'Outlook',
+        status: 'coming_soon',
+        capabilities: null,
+        detail: 'Microsoft Graph connector arrives with the Orgs Phase',
+      },
+      {
+        provider: 'yahoo',
+        display_name: 'Yahoo Mail',
+        status: 'unsupported',
+        capabilities: null,
+        detail: 'Yahoo Mail has no third-party OAuth API',
+      },
+      {
+        provider: 'icloud',
+        display_name: 'iCloud Mail',
+        status: 'unsupported',
+        capabilities: null,
+        detail: 'iCloud Mail has no third-party OAuth API',
+      },
+    ];
+  }
+  const res = await apiFetch('/connectors/capabilities');
+  return res.items as EmailProviderRegistryEntry[];
+}
+
+export async function listEmailConnectors(): Promise<EmailConnectorAccount[]> {
+  if (USE_MOCK) return []; // Demo mode: no connectors, no fake Gmail account.
+  const res = await apiFetch('/connectors');
+  return res.items as EmailConnectorAccount[];
+}
+
+export async function authorizeGmailConnector(): Promise<string> {
+  if (USE_MOCK) {
+    throw new Error('DEMO MODE — connector actions are simulated/unavailable');
+  }
+  const res = await apiFetch('/connectors/gmail/authorize', { method: 'POST', body: '{}' });
+  return res.authorization_url as string;
+}
+
+export async function testEmailConnector(
+  id: string,
+): Promise<{ ok: boolean; email_address?: string; messages_total?: number; message?: string }> {
+  if (USE_MOCK) {
+    throw new Error('DEMO MODE — connector actions are simulated/unavailable');
+  }
+  return (await apiFetch(`/connectors/${id}/test`, { method: 'POST' })) as {
+    ok: boolean;
+    message?: string;
+  };
+}
+
+export async function disconnectEmailConnector(id: string): Promise<void> {
+  if (USE_MOCK) {
+    throw new Error('DEMO MODE — connector actions are simulated/unavailable');
+  }
+  await apiFetch(`/connectors/${id}`, { method: 'DELETE' });
+}
+
+export async function listConnectorOperations(): Promise<ConnectorOperationLog[]> {
+  if (USE_MOCK) return [];
+  const res = await apiFetch('/connectors/operations');
+  return res.items as ConnectorOperationLog[];
 }
 
 export function isMockMode(): boolean {

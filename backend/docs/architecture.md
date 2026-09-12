@@ -164,6 +164,20 @@ duplicate identities for the same verified email are impossible because the
 upsert keys on Supabase user id and email. Two Supabase keys remain strictly
 separated (anon = verification, service role = migrations/storage only).
 
+### Email connectors (Phase 1-2)
+
+Gmail is the only live provider. It uses CYBERGUARD's **own Google OAuth
+client** (Supabase Google login stays identity-only) with the `gmail.modify`
+scope and offline access. Access/refresh tokens are encrypted at rest
+(Fernet, `CONNECTOR_TOKEN_KEY`) in `cyberguard.email_connector_accounts`;
+the browser only ever receives connector metadata. The OAuth callback
+consumes single-use, expiring state rows via the service-role helper and
+redirects to the frontend with a safe status — never tokens. Google errors
+map to honest failure classes (`reauth_required`, `insufficient_scope`,
+`rate_limited`, `failed`) recorded in `connector_operation_logs`. Outlook,
+Yahoo, and iCloud are declared coming-soon/unsupported in the capability
+registry, never faked. Details: `docs/email_connectors.md`.
+
 ### Original hardening (unchanged)
 
 1. **Two Supabase keys, strictly separated**

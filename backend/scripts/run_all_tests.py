@@ -368,6 +368,14 @@ async def run_tests():
 
     await run_rls_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 11. Phase 1-2 — Gmail Connector, OAuth Flow & Encrypted Token Vault
+    # -----------------------------------------------------------------------
+    print("\n[Suite 11] Phase 1-2 — Email Connectors (Gmail OAuth + token vault)")
+    from test_email_connectors import run_email_connector_tests
+
+    await run_email_connector_tests(runner)
+
     return runner.report()
 
 

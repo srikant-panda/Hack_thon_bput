@@ -70,3 +70,18 @@ consequences. Newest entries at the bottom.
   project row (with an auto-generated unique username) via the JIT upsert in
   `get_current_user`. Rationale: username uniqueness across auth identities
   cannot be guaranteed client-side.
+
+- **2026-09-13 — Gmail connector with own OAuth client, encrypted token vault, honest provider registry (Phase 1-2).**
+  Gmail mailbox access uses a dedicated Google Cloud OAuth client owned by
+  CYBERGUARD — deliberately separate from Supabase's Google identity provider,
+  so login tokens can never be confused with mailbox tokens. Tokens are
+  encrypted at rest (Fernet via `CONNECTOR_TOKEN_KEY`) and never leave the
+  backend; the OAuth callback authenticates with a single-use expiring state
+  row (consumed via the service-role helper) instead of a bearer token, and
+  redirects carry only a safe status. The provider registry declares Gmail
+  enabled (when configured) and Outlook/Yahoo/iCloud as coming-soon or
+  unsupported with explicit reasons — no fake provider success anywhere.
+  Rationale: mailbox access is the highest-sensitivity integration the
+  platform has, so token custody, audit (`connector_operation_logs`), and
+  honest capability reporting are foundational. Mailbox scanning is Phase 3;
+  quarantine/sender actions Phase 4; event email notifications Phase 7.

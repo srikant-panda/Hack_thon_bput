@@ -345,3 +345,53 @@ export interface PolicyUpdatePayload {
   notify_soc_on_high?: boolean;
   notify_user_on_medium?: boolean;
 }
+
+// --- Email Connectors (Phase 1-2: Gmail only) ---
+
+export type ConnectorProvider = 'gmail' | 'outlook' | 'yahoo' | 'icloud';
+export type ConnectorStatus = 'connected' | 'reauth_required' | 'revoked' | 'error';
+export type ConnectorProviderStatus = 'enabled' | 'coming_soon' | 'unsupported';
+
+export interface EmailProviderCapability {
+  read_messages: boolean;
+  read_attachments: boolean;
+  modify_labels: boolean;
+  quarantine: boolean;
+  trash: boolean;
+  permanent_delete: boolean;
+  sender_rules: boolean;
+  send_mail: boolean;
+  unsupported_reason?: string | null;
+}
+
+export interface EmailProviderRegistryEntry {
+  provider: ConnectorProvider;
+  display_name: string;
+  status: ConnectorProviderStatus;
+  capabilities: EmailProviderCapability | null;
+  detail: string;
+}
+
+export interface EmailConnectorAccount {
+  id: string;
+  provider: ConnectorProvider;
+  provider_email: string;
+  status: ConnectorStatus;
+  scopes: string[];
+  capabilities: Partial<EmailProviderCapability>;
+  last_test_at: string | null;
+  last_sync_at: string | null;
+  last_error: string | null;
+  created_at: string | null;
+}
+
+export interface ConnectorOperationLog {
+  id: string;
+  connector_id: string | null;
+  provider: ConnectorProvider;
+  operation: 'authorize' | 'callback' | 'token_refresh' | 'test_connection' | 'disconnect';
+  status: 'success' | 'failed' | 'unsupported' | 'insufficient_scope' | 'reauth_required';
+  message: string | null;
+  provider_error_code: string | null;
+  created_at: string | null;
+}

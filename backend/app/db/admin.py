@@ -68,3 +68,84 @@ async def resolve_email_for_identifier(identifier: str) -> Optional[str]:
             select(User.email).where(User.username == identifier).limit(1)
         )
         return result.scalar_one_or_none()
+
+
+# --- Connector OAuth state (service-role; the Gmail callback carries no
+# bearer token, so it cannot pass RLS. Acceptable because state is
+# high-entropy, expires after CONNECTOR_OAUTH_STATE_TTL_SECONDS, is
+# single-use, and no token is ever exposed to the frontend). ---
+
+
+async def consume_connector_oauth_state(state: str) -> Optional[dict]:
+    """Atomically read-and-delete a single-use OAuth state row.
+
+    Returns {owner_user_id, provider, redirect_after} or None when unknown,
+    already consumed, or expired.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import delete
+
+    from app.db.models import ConnectorOAuthState
+
+    async with _get_admin_session_maker()() as session:
+        result = await session.execute(
+            select(ConnectorOAuthState).where(ConnectorOAuthState.state == state)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        # Delete first (single-use), then validate expiry.
+        await session.execute(
+            delete(ConnectorOAuthState).where(ConnectorOAuthState.state == state)
+        )
+        await session.commit()
+        expires_at = row.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            # SQLite returns naive datetimes; treat as UTC.
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at is not None and expires_at < datetime.now(timezone.utc):
+            return None
+        return {
+            "owner_user_id": row.owner_user_id,
+            "provider": row.provider,
+            "redirect_after": row.redirect_after,
+        }
+
+
+async def log_connector_operation_admin(
+    *,
+    owner_user_id: str,
+    provider: str,
+    operation: str,
+    status: str,
+    connector_id: Optional[str] = None,
+    message: Optional[str] = None,
+    provider_error_code: Optional[str] = None,
+    provider_error_detail: Optional[str] = None,
+) -> None:
+    """Write a connector operation log via the service role (pre-auth paths)."""
+    import logging
+    import uuid
+
+    from app.db.models import ConnectorOperationLog
+
+    logger_ = logging.getLogger("cyberguard.connectors")
+    try:
+        async with _get_admin_session_maker()() as session:
+            session.add(
+                ConnectorOperationLog(
+                    id=str(uuid.uuid4()),
+                    owner_user_id=owner_user_id,
+                    connector_id=connector_id,
+                    provider=provider,
+                    operation=operation,
+                    status=status,
+                    message=message,
+                    provider_error_code=provider_error_code,
+                    provider_error_detail=provider_error_detail,
+                )
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001 - logging must never break the flow
+        logger_.exception("Failed to write connector operation log (admin)")

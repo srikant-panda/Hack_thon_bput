@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     # Organization accounts are frozen ("coming soon") until the Orgs Phase.
     ORG_ENABLED: bool = False
 
+    # --- Email connectors (Phase 1-2): Gmail only; own Google OAuth client ---
+    GOOGLE_GMAIL_CLIENT_ID: str = ""
+    GOOGLE_GMAIL_CLIENT_SECRET: str = ""
+    GOOGLE_GMAIL_REDIRECT_URI: str = "http://localhost:8000/api/v1/connectors/gmail/callback"
+    # Where the Gmail OAuth callback redirects the browser afterwards.
+    FRONTEND_CONNECTORS_URL: str = "http://localhost:5173/email-connectors"
+    # Fernet key encrypting provider tokens at rest. Generate with:
+    #   uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    CONNECTOR_TOKEN_KEY: str = ""
+    CONNECTOR_OAUTH_STATE_TTL_SECONDS: int = 600
+    GMAIL_CONNECTOR_ENABLED: bool = True
+
     # Multi-Provider Orchestration (Groq, Gemini, OpenRouter)
     LLM_PROVIDERS: str = "groq,gemini,openrouter"
     LLM_COOLDOWN_SECONDS: int = 60
