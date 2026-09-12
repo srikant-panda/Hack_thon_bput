@@ -1,13 +1,19 @@
-"""Gmail provider implementation (Phase 1-2: profile + connection test).
+"""Gmail provider implementation.
 
-Uses CYBERGUARD's own Google OAuth client; access tokens are minted by
-app/services/connectors/oauth_service.py and decrypted only in runtime.
+Phase 1-2: profile + connection test.
+Phase 3: message listing and full MIME message retrieval mapped onto the
+provider-neutral NormalizedMessage schema.
 """
 
+import base64
 import logging
+import re
 
 import httpx
+from datetime import datetime, timezone
+from email.header import decode_header, make_header
 
+from app.schemas.email import NormalizedMessage
 from app.services.email_providers.base import (
     EmailProviderError,
     ProviderCapability,
@@ -24,6 +30,9 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 
 _TIMEOUT = httpx.Timeout(15.0)
+
+# Attachments kept as metadata only in Phase 3 (no binary download yet).
+_MEDIA_MIME_PREFIXES = ("image/", "audio/", "video/")
 
 
 class GmailProvider:
@@ -108,6 +117,134 @@ class GmailProvider:
             "threads_total": profile.get("threads_total"),
             "ok": True,
         }
+
+    # ------------------------------------------------------------------
+    # Phase 3 — mailbox reading
+    # ------------------------------------------------------------------
+
+    async def list_messages(self, access_token: str, max_results: int = 50) -> list[dict]:
+        """GET /users/me/messages → list of {id, thread_id} (most recent first)."""
+        data = await self._request(
+            "GET",
+            f"{GMAIL_API_BASE}/users/me/messages",
+            access_token,
+            params={"maxResults": max(1, min(int(max_results), 100))},
+        )
+        return [
+            {"id": item.get("id", ""), "thread_id": item.get("threadId", "")}
+            for item in data.get("messages", [])
+            if item.get("id")
+        ]
+
+    async def get_message(self, access_token: str, message_id: str) -> NormalizedMessage:
+        """Fetch a full message and map it to the NormalizedMessage schema."""
+        raw = await self._request(
+            "GET",
+            f"{GMAIL_API_BASE}/users/me/messages/{message_id}",
+            access_token,
+            params={"format": "full"},
+        )
+        return self._normalize(message_id, raw)
+
+    # --- normalization helpers ---
+
+    @staticmethod
+    def _b64url_decode(data: str) -> bytes:
+        """Gmail base64url body decode (padding-safe)."""
+        padded = data.replace("-", "+").replace("_", "/")
+        padded += "=" * (-len(padded) % 4)
+        return base64.b64decode(padded)
+
+    @staticmethod
+    def _decode_mime_header(value: str) -> str:
+        try:
+            return str(make_header(decode_header(value or "")))
+        except Exception:  # noqa: BLE001 - undecodable headers stay raw
+            return value or ""
+
+    def _collect_parts(self, payload: dict, parts_out: list[dict]) -> None:
+        parts_out.append(payload)
+        for part in payload.get("parts", []) or []:
+            self._collect_parts(part, parts_out)
+
+    def _extract_bodies_and_attachments(self, payload: dict) -> tuple[str | None, str | None, list[dict]]:
+        parts: list[dict] = []
+        self._collect_parts(payload, parts)
+
+        body_text: str | None = None
+        body_html: str | None = None
+        attachments: list[dict] = []
+
+        for part in parts:
+            mime = part.get("mimeType", "")
+            body = part.get("body", {}) or {}
+            data = body.get("data")
+            filename = part.get("filename") or ""
+            if filename or part.get("body", {}).get("attachmentId"):
+                # Anything with a filename/attachmentId is an attachment; still
+                # inline text/* parts without filenames remain body candidates.
+                if filename and mime:
+                    attachments.append(
+                        {
+                            "filename": filename,
+                            "mime_type": mime,
+                            "size": int(body.get("size") or 0),
+                            "attachment_id": body.get("attachmentId"),
+                            "is_media": mime.startswith(_MEDIA_MIME_PREFIXES),
+                        }
+                    )
+                    continue
+            if data and mime == "text/plain" and body_text is None:
+                body_text = self._b64url_decode(data).decode("utf-8", errors="replace")
+            elif data and mime == "text/html" and body_html is None:
+                body_html = self._b64url_decode(data).decode("utf-8", errors="replace")
+
+        if body_text is None and body_html is None and payload.get("body", {}).get("data"):
+            # Single-part messages put the body directly on the payload.
+            body_text = self._b64url_decode(payload["body"]["data"]).decode("utf-8", errors="replace")
+
+        return body_text, body_html, attachments
+
+    def _normalize(self, message_id: str, raw: dict) -> NormalizedMessage:
+        headers_map = {
+            self._decode_mime_header(h.get("name", "")): self._decode_mime_header(h.get("value", ""))
+            for h in raw.get("payload", {}).get("headers", [])
+        }
+        body_text, body_html, attachments = self._extract_bodies_and_attachments(raw.get("payload", {}) or {})
+
+        internal_date = raw.get("internalDate")
+        received_at = None
+        if internal_date:
+            try:
+                received_at = datetime.fromtimestamp(int(internal_date) / 1000, tz=timezone.utc)
+            except (ValueError, OverflowError, OSError):
+                received_at = None
+
+        label_ids = raw.get("labelIds", []) or []
+        is_read = "UNREAD" not in label_ids
+
+        # Strip HTML tags for a text fallback when only HTML is present.
+        if body_text is None and body_html is not None:
+            body_text = re.sub(r"<[^>]+>", " ", body_html)
+            body_text = re.sub(r"\s+", " ", body_text).strip()
+
+        return NormalizedMessage(
+            provider_message_id=message_id,
+            provider="gmail",
+            sender=headers_map.get("From", ""),
+            recipients=[
+                r.strip()
+                for r in re.split("[,;]", headers_map.get("To", ""))
+                if r.strip()
+            ],
+            subject=headers_map.get("Subject", ""),
+            body_text=body_text,
+            body_html=body_html,
+            headers=headers_map,
+            attachments_meta=attachments,
+            received_at=received_at,
+            is_read=is_read,
+        )
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -5,16 +5,24 @@ import {
   CheckCircle2,
   Cloud,
   ExternalLink,
+  FileSearch,
   Loader2,
   Mail,
   PlugZap,
   RefreshCw,
   Unplug,
+  X,
   XCircle,
 } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
+import VerboseResultPanel from '../components/common/VerboseResultPanel';
 import * as api from '../services/api';
-import type { EmailConnectorAccount, EmailProviderRegistryEntry } from '../types';
+import type {
+  EmailConnectorAccount,
+  EmailProviderRegistryEntry,
+  MessageAnalysis,
+  ScanResult,
+} from '../types';
 
 const PROVIDER_ICONS: Record<string, typeof Mail> = {
   gmail: Mail,
@@ -28,6 +36,14 @@ const STATUS_STYLES: Record<string, string> = {
   reauth_required: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/30',
   revoked: 'bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700',
   error: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/30',
+};
+
+const SEVERITY_BADGE: Record<string, string> = {
+  critical: 'bg-red-500/15 text-red-400 ring-1 ring-red-500/40',
+  high: 'bg-orange-500/10 text-orange-400 ring-1 ring-orange-500/40',
+  medium: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/40',
+  low: 'bg-yellow-500/10 text-yellow-500 ring-1 ring-yellow-500/40',
+  safe: 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/30',
 };
 
 const PROVIDER_STATUS_STYLES: Record<string, string> = {
@@ -54,6 +70,11 @@ export default function EmailConnectors() {
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; ok: boolean; message: string } | null>(null);
+  const [scanningConnector, setScanningConnector] = useState<string | null>(null);
+  const [scanResults, setScanResults] = useState<ScanResult[] | null>(null);
+  const [scannedConnector, setScannedConnector] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<MessageAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
 
   const oauthStatus = searchParams.get('status');
   const oauthReason = searchParams.get('reason');
@@ -124,6 +145,34 @@ export default function EmailConnectors() {
       });
     } finally {
       setTestingId(null);
+    }
+  };
+
+  const handleScan = async (connector: EmailConnectorAccount) => {
+    setScanningConnector(connector.id);
+    setActionError(null);
+    setScanResults(null);
+    setScannedConnector(null);
+    try {
+      const results = await api.scanConnectorMessages(connector.id, { scan_recent: 10 });
+      setScanResults(results);
+      setScannedConnector(connector.id);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Mailbox scan failed');
+    } finally {
+      setScanningConnector(null);
+    }
+  };
+
+  const openAnalysis = async (connectorId: string, messageId: string) => {
+    setAnalysisLoading(true);
+    setAnalysis(null);
+    try {
+      setAnalysis(await api.getMessageAnalysis(connectorId, messageId));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to load analysis');
+    } finally {
+      setAnalysisLoading(false);
     }
   };
 
@@ -289,6 +338,21 @@ export default function EmailConnectors() {
                   )}
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-2">
+                  {connector.provider === 'gmail' && connector.status === 'connected' && (
+                    <button
+                      type="button"
+                      onClick={() => handleScan(connector)}
+                      disabled={scanningConnector === connector.id}
+                      className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-red-500/40 hover:bg-zinc-800/60 disabled:opacity-50"
+                    >
+                      {scanningConnector === connector.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <FileSearch className="h-3.5 w-3.5" />
+                      )}
+                      {scanningConnector === connector.id ? 'Scanning…' : 'Scan Recent Mail'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleTest(connector)}
@@ -313,6 +377,119 @@ export default function EmailConnectors() {
           </div>
         )}
       </div>
+
+      {/* Scan results */}
+      {scanResults !== null && scannedConnector && (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-sm backdrop-blur">
+          <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+            <h2 className="text-sm font-semibold text-zinc-100">
+              Scan Results{' '}
+              <span className="font-mono text-xs text-zinc-500">
+                ({scanResults.length} message{scanResults.length === 1 ? '' : 's'} analyzed · analysis only, no mailbox actions performed)
+              </span>
+            </h2>
+            <button
+              type="button"
+              onClick={() => { setScanResults(null); setScannedConnector(null); }}
+              className="text-xs text-zinc-400 transition hover:text-red-400"
+            >
+              Clear
+            </button>
+          </div>
+
+          {scanResults.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-zinc-500">
+              The mailbox returned no messages to scan.
+            </div>
+          ) : (
+            <div className="divide-y divide-zinc-800">
+              {[...scanResults]
+                .sort((a, b) => b.overall_score - a.overall_score)
+                .map((result) => (
+                  <button
+                    key={result.message_id}
+                    type="button"
+                    onClick={() => openAnalysis(scannedConnector, result.message_id)}
+                    className="flex w-full flex-wrap items-center gap-3 px-5 py-3.5 text-left transition hover:bg-zinc-900"
+                  >
+                    <span
+                      className={`rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${
+                        SEVERITY_BADGE[result.overall_severity] ?? SEVERITY_BADGE.safe
+                      }`}
+                    >
+                      {result.overall_severity}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">
+                      {result.subject || '(no subject)'}
+                      <span className="ml-2 text-xs text-zinc-500">— {result.sender}</span>
+                    </span>
+                    <span className="font-mono text-xs text-zinc-500">{Math.round(result.overall_score * 100)}/100</span>
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-600">
+                      action: {result.recommended_action} · {result.provider_operation_status}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Analysis drawer */}
+      {analysisLoading && (
+        <div className="flex items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/90 px-5 py-10 text-sm text-zinc-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading full analysis…
+        </div>
+      )}
+      {analysis && (
+        <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/70 backdrop-blur-sm" onClick={() => setAnalysis(null)}>
+          <div
+            className="h-full w-full max-w-3xl overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-zinc-100">{analysis.scan.subject || '(no subject)'}</h3>
+                <p className="mt-0.5 font-mono text-xs text-zinc-500">
+                  {analysis.scan.sender} · {analysis.message.recipients.join(', ') || '—'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAnalysis(null)}
+                className="rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 transition hover:text-red-400"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <VerboseResultPanel scan={analysis.scan} />
+
+            <div className="mt-5">
+              <h4 className="mb-2 font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                Message body
+              </h4>
+              {analysis.message.body_html ? (
+                <iframe
+                  title="message-body"
+                  sandbox=""
+                  srcDoc={analysis.message.body_html}
+                  className="h-96 w-full rounded-xl border border-zinc-800 bg-white"
+                />
+              ) : (
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-900/90 p-4 text-xs leading-relaxed text-zinc-300">
+                  {analysis.message.body_text || '(empty body)'}
+                </pre>
+              )}
+              {analysis.message.attachments_meta.length > 0 && (
+                <p className="mt-2 font-mono text-[11px] text-zinc-500">
+                  Attachments (metadata only):{' '}
+                  {analysis.message.attachments_meta.map((a) => `${a.filename} (${a.mime_type})`).join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <p className="text-[11px] leading-relaxed text-zinc-600">
         Gmail access uses CYBERGUARD's own Google OAuth client with the

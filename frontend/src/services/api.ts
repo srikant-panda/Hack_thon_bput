@@ -22,7 +22,10 @@ import type {
 
   EmailConnectorAccount,
   EmailProviderRegistryEntry,
-  ConnectorOperationLog,} from '../types';
+  ConnectorOperationLog,
+  MailMessageSummary,
+  ScanResult,
+  MessageAnalysis,} from '../types';
 import * as mockApi from './mockApi';
 import { db, addAuditLog } from './mockData';
 import { ApiError, apiFetch } from './http';
@@ -625,6 +628,40 @@ export async function listConnectorOperations(): Promise<ConnectorOperationLog[]
   if (USE_MOCK) return [];
   const res = await apiFetch('/connectors/operations');
   return res.items as ConnectorOperationLog[];
+}
+
+
+// --- Mailbox scanning (Phase 3) — analysis only; enforcement is Phase 4 ---
+
+export async function listConnectorMessages(
+  connectorId: string,
+  limit = 20,
+): Promise<MailMessageSummary[]> {
+  if (USE_MOCK) return []; // Demo mode has no real mailbox.
+  return (await apiFetch(`/connectors/${connectorId}/messages?limit=${limit}`)) as MailMessageSummary[];
+}
+
+export async function scanConnectorMessages(
+  connectorId: string,
+  body: { message_ids?: string[]; scan_recent?: number },
+): Promise<ScanResult[]> {
+  if (USE_MOCK) {
+    throw new Error('DEMO MODE — mailbox scanning requires a real connected mailbox');
+  }
+  return (await apiFetch(`/connectors/${connectorId}/scan`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })) as ScanResult[];
+}
+
+export async function getMessageAnalysis(
+  connectorId: string,
+  messageId: string,
+): Promise<MessageAnalysis> {
+  if (USE_MOCK) {
+    throw new Error('DEMO MODE — mailbox scanning requires a real connected mailbox');
+  }
+  return (await apiFetch(`/connectors/${connectorId}/messages/${messageId}/analysis`)) as MessageAnalysis;
 }
 
 export function isMockMode(): boolean {

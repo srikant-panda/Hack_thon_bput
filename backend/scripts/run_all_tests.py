@@ -376,6 +376,14 @@ async def run_tests():
 
     await run_email_connector_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 12. Phase 3 — Mailbox Scanning, Normalization & Verbose Results
+    # -----------------------------------------------------------------------
+    print("\n[Suite 12] Phase 3 — Mailbox Scanning & Verbose Analysis")
+    from test_mail_scanner import run_mail_scanner_tests
+
+    await run_mail_scanner_tests(runner)
+
     return runner.report()
 
 

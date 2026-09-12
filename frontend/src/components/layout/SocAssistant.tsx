@@ -37,6 +37,20 @@ export default function SocAssistant({ open, userName, onClose }: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, thinking]);
 
+  // Session-only chat policy: history lives in component state only (never
+  // localStorage/persist) and is scrubbed when the assistant unmounts or the
+  // tab closes, so no mail/alert conversation survives the session.
+  useEffect(() => {
+    const scrub = () => setMessages([]);
+    window.addEventListener('beforeunload', scrub);
+    window.addEventListener('pagehide', scrub);
+    return () => {
+      window.removeEventListener('beforeunload', scrub);
+      window.removeEventListener('pagehide', scrub);
+      scrub();
+    };
+  }, []);
+
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || thinking) return;

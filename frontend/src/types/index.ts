@@ -395,3 +395,65 @@ export interface ConnectorOperationLog {
   provider_error_code: string | null;
   created_at: string | null;
 }
+
+// --- Mailbox scanning (Phase 3) ---
+
+export interface NormalizedMessage {
+  provider_message_id: string;
+  provider: string;
+  sender: string;
+  recipients: string[];
+  subject: string;
+  body_text: string | null;
+  body_html: string | null;
+  headers: Record<string, string>;
+  attachments_meta: { filename: string; mime_type?: string; size?: number; is_media?: boolean }[];
+  received_at: string | null;
+  is_read: boolean;
+}
+
+export interface MailMessageSummary {
+  provider_message_id: string;
+  provider: string;
+  sender: string;
+  recipients: string[];
+  subject: string;
+  received_at: string | null;
+  is_read: boolean;
+  has_attachments: boolean;
+  body_preview: string;
+}
+
+export interface ScanIndicator {
+  name: string;
+  value: string;
+  weight: number;
+}
+
+export interface FeatureAnalysis {
+  engine: string;
+  severity: string;
+  score: number;
+  explanation: string;
+  indicators: ScanIndicator[];
+}
+
+export interface ScanResult {
+  message_id: string;
+  provider: string;
+  sender: string;
+  subject: string;
+  received_at: string | null;
+  overall_severity: string;
+  overall_score: number;
+  overall_explanation: string;
+  feature_analyses: FeatureAnalysis[];
+  recommended_action: string;
+  provider_operation_status: string;
+  provider_operation_detail: string | null;
+}
+
+export interface MessageAnalysis {
+  scan: ScanResult;
+  message: NormalizedMessage;
+}
