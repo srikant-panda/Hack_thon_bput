@@ -37,3 +37,22 @@ backend = "backend:main"
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["scripts", "frontend", "node_modules", ".venv", "ml", "storage"]
+asyncio_mode = "auto"
+addopts = "-v -ra --tb=short --strict-markers"
+markers = [
+  "scale: large-scale dataset evaluation tests",
+  "online: requires network fetch (falls back to cache/synthetic)",
+  "http: HTTP API tests via ASGI client",
+  "media: image/audio media forensics tests",
+  "slow: long-running tests",
+]

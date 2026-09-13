@@ -160,3 +160,18 @@ consequences. Newest entries at the bottom.
   client-facing "log paste and analyze" feature: it auto-detects auth-log vs
   network-flow JSON, drives the existing detectors analysis-only, and shows
   honest format errors — no sample auto-fills, no fake data.
+
+- **2026-09-13 — Real pytest evaluation harness with online-fetch + mandatory synthetic fallback (evaluation layer).**
+  The regression suite (scripts/run_all_tests.py) and the new pytest harness
+  (backend/tests/) are deliberately separate: the regression suite guards
+  behavior, the harness measures quality at scale (P/R/F1/AUC, band
+  separation, Mann-Whitney p, latency percentiles) and never fixes app code —
+  findings are recorded in the report instead. Online datasets (SMS Spam
+  Collection, OpenPhish) are fetched once, cached (gitignored), and
+  provenance-tracked; seeded deterministic synthetic generators are a
+  mandatory fallback so the suite runs fully offline at the venue. Metrics
+  use an adaptive positive threshold (midpoint of class means) for engines
+  whose score ranges sit below 50, and threshold-free AUC as the headline
+  metric. The harness surfaced two real calibration findings on first run
+  (v2 URL model FPs on benign top-1m domains; per-flow network heuristics
+  blind to low-and-slow beaconing) — recorded, not fixed.

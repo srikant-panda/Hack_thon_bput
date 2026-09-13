@@ -83,3 +83,4 @@ logs/
 
 # Media storage fallback (runtime artifacts)
 backend/storage/
+backend/tests/data/cache/
