@@ -26,6 +26,7 @@ from app.db.models import BlockedSender, ConnectorOperationLog, QuarantinedItem
 from app.services.email_providers.base import EmailProviderError
 from app.services.email_providers.gmail import gmail_provider
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
+from app.services.security_history_service import record_event
 
 logger = logging.getLogger("cyberguard.scheduler")
 
@@ -83,6 +84,24 @@ async def run_expiry_once() -> dict:
                         message=f"Quarantine expired; released {item.provider_message_id} to inbox",
                     )
                 )
+                await record_event(
+                    db,
+                    owner_user_id=item.owner_user_id,
+                    event_type="release",
+                    actor_type="scheduler",
+                    connector_id=item.connector_id,
+                    provider="gmail",
+                    provider_message_id=item.provider_message_id,
+                    sender_email=item.sender_email,
+                    subject=(item.scan_result_json or {}).get("subject"),
+                    severity=item.severity,
+                    score=(item.scan_result_json or {}).get("overall_score"),
+                    action_requested="quarantine",
+                    action_performed="auto_release_expiry",
+                    operation_status="success",
+                    operation_detail="Quarantine expired per user settings; message returned to the inbox",
+                    quarantined_item_id=item.id,
+                )
                 await db.commit()
                 stats["quarantine_expired"] += 1
             except (EmailProviderError, TokenRefreshError, RuntimeError) as exc:
@@ -117,6 +136,20 @@ async def run_expiry_once() -> dict:
                         status="success",
                         message=f"Sender block expired; filter removed for {block.sender_email}",
                     )
+                )
+                await record_event(
+                    db,
+                    owner_user_id=block.owner_user_id,
+                    event_type="sender_expiry",
+                    actor_type="scheduler",
+                    connector_id=block.connector_id,
+                    provider="gmail",
+                    sender_email=block.sender_email,
+                    action_requested="block_sender",
+                    action_performed="delete_sender_rule",
+                    operation_status="success",
+                    operation_detail=f"Block expired per user settings; Gmail filter {block.provider_rule_id} removed",
+                    blocked_sender_id=block.id,
                 )
                 await db.commit()
                 stats["blocks_expired"] += 1

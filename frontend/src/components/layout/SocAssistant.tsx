@@ -1,7 +1,54 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Send, Shield, X } from 'lucide-react';
+import { Bot, Clock3, Send, Shield, X } from 'lucide-react';
 import * as api from '../../services/api';
 import type { ChatMessage } from '../../types';
+
+// Session-only chat policy (Phase 5): history lives in sessionStorage under a
+// per-tab key and is destroyed with the tab. Never localStorage, never the DB,
+// and never written to permanent security history.
+const TAB_ID_KEY = 'cyberguard_assistant_tab_id';
+
+function _tabId(): string {
+  let id = sessionStorage.getItem(TAB_ID_KEY);
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    sessionStorage.setItem(TAB_ID_KEY, id);
+  }
+  return id;
+}
+
+function _chatStorageKey(): string {
+  return `cyberguard_assistant_chat_${_tabId()}`;
+}
+
+function _loadSessionChat(): ChatMessage[] | null {
+  try {
+    const raw = sessionStorage.getItem(_chatStorageKey());
+    return raw ? (JSON.parse(raw) as ChatMessage[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function _saveSessionChat(messages: ChatMessage[]): void {
+  try {
+    sessionStorage.setItem(_chatStorageKey(), JSON.stringify(messages));
+  } catch {
+    // storage full/unavailable — chat simply stays in memory for this tab
+  }
+}
+
+function _clearSessionChat(): void {
+  try {
+    sessionStorage.removeItem(_chatStorageKey());
+    sessionStorage.removeItem(TAB_ID_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 const QUICK_ACTIONS = [
   "Summarize today's threats",
@@ -19,16 +66,17 @@ interface Props {
 }
 
 export default function SocAssistant({ open, userName, onClose }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const welcome: ChatMessage = {
       id: 'welcome',
       role: 'assistant',
       content: api.isMockMode()
         ? `Hello ${userName}. I'm the SOC Assistant running in mock mode. Ask me about today's threats, critical alerts, MITRE techniques, or what to investigate first.`
         : `Hello ${userName}. I'm the SOC Assistant, connected to the live backend. Ask me about today's threats, critical alerts, MITRE techniques, or what to investigate first.`,
       timestamp: Date.now(),
-    },
-  ]);
+    };
+    return _loadSessionChat() ?? [welcome];
+  });
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -37,11 +85,19 @@ export default function SocAssistant({ open, userName, onClose }: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, thinking]);
 
-  // Session-only chat policy: history lives in component state only (never
-  // localStorage/persist) and is scrubbed when the assistant unmounts or the
-  // tab closes, so no mail/alert conversation survives the session.
+  // Persist to sessionStorage (per-tab key) while the tab lives.
   useEffect(() => {
-    const scrub = () => setMessages([]);
+    _saveSessionChat(messages);
+  }, [messages]);
+
+  // Session-only policy: on unmount or tab close the stored history is
+  // destroyed — nothing survives the tab, and nothing reaches localStorage
+  // or the permanent security history.
+  useEffect(() => {
+    const scrub = () => {
+      _clearSessionChat();
+      setMessages([]);
+    };
     window.addEventListener('beforeunload', scrub);
     window.addEventListener('pagehide', scrub);
     return () => {
@@ -86,6 +142,9 @@ export default function SocAssistant({ open, userName, onClose }: Props) {
             <div>
               <div className="text-sm font-semibold text-zinc-100">SOC Assistant</div>
               <div className="text-[10px] uppercase tracking-wider text-red-400">{MODE_SUBTITLE}</div>
+              <div className="mt-0.5 flex items-center gap-1 text-[9px] text-zinc-500">
+                <Clock3 className="h-2.5 w-2.5" /> Session-only — history is discarded when this tab closes.
+              </div>
             </div>
           </div>
           <button

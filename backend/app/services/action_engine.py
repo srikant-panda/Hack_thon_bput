@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.schemas.email import NormalizedMessage
 from app.schemas.scan_results import ScanResult
+from app.services.security_history_service import record_event
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
 from app.services.email_providers.base import EmailProviderError
 from app.services.email_providers.gmail import gmail_provider
@@ -147,18 +148,19 @@ async def enforce_scan_result(
             if existing.scalar_one_or_none() is None:
                 rule = await gmail_provider.create_sender_rule(token, sender, label_id)
                 rule_id = str(rule.get("id", ""))
-                db.add(
-                    BlockedSender(
-                        owner_user_id=connector.owner_user_id,
-                        connector_id=connector.id,
-                        sender_email=sender,
-                        provider_rule_id=rule_id,
-                        reason=f"Auto-blocked: {scan.overall_severity} message",
-                        expires_at=expires_at,
-                        status="blocked",
-                    )
+                block_row = BlockedSender(
+                    owner_user_id=connector.owner_user_id,
+                    connector_id=connector.id,
+                    sender_email=sender,
+                    provider_rule_id=rule_id,
+                    reason=f"Auto-blocked: {scan.overall_severity} message",
+                    expires_at=expires_at,
+                    status="blocked",
                 )
+                db.add(block_row)
                 await db.commit()
+                await db.refresh(block_row)
+                block_id = block_row.id
             else:
                 rule_note = " Sender already blocked."
 
@@ -178,6 +180,43 @@ async def enforce_scan_result(
         # Keep the stored review snapshot consistent with the final outcome.
         item.scan_result_json = scan.model_dump(mode="json")
         await db.commit()
+
+        # Security history (Phase 5): the real provider operations just performed.
+        await record_event(
+            db,
+            owner_user_id=connector.owner_user_id,
+            event_type="quarantine",
+            actor_type="system",
+            connector=connector,
+            provider_message_id=message.provider_message_id,
+            sender_email=sender,
+            subject=message.subject,
+            severity=scan.overall_severity,
+            score=scan.overall_score,
+            explanation=scan.overall_explanation,
+            action_requested=scan.recommended_action,
+            action_performed="quarantine",
+            operation_status="success",
+            operation_detail=f"Gmail label '{gmail_provider.QUARANTINE_LABEL_NAME}' applied, INBOX removed",
+            quarantined_item_id=item.id,
+        )
+        if rule_id:
+            await record_event(
+                db,
+                owner_user_id=connector.owner_user_id,
+                event_type="sender_block",
+                actor_type="system",
+                connector=connector,
+                provider_message_id=message.provider_message_id,
+                sender_email=sender,
+                subject=message.subject,
+                severity=scan.overall_severity,
+                action_requested="block_sender",
+                action_performed="create_sender_rule",
+                operation_status="success",
+                operation_detail=f"Gmail filter {rule_id} auto-quarantines future mail from {sender}",
+                blocked_sender_id=block_id,
+            )
         await _log(db, connector, "enforcement", "success",
                    f"Quarantined {message.provider_message_id} from {sender}", connector_id=connector.id)
         return scan
@@ -185,6 +224,22 @@ async def enforce_scan_result(
     except (EmailProviderError, EnforcementOutcome) as exc:
         error_class = getattr(exc, "error_class", "api_error")
         message_text = getattr(exc, "message", str(exc))
+        await record_event(
+            db,
+            owner_user_id=connector.owner_user_id,
+            event_type="quarantine",
+            actor_type="system",
+            connector=connector,
+            provider_message_id=message.provider_message_id,
+            sender_email=sender,
+            subject=message.subject,
+            severity=scan.overall_severity,
+            score=scan.overall_score,
+            action_requested=scan.recommended_action,
+            action_performed="quarantine",
+            operation_status=error_class if error_class in ("failed", "insufficient_scope", "reauth_required") else "failed",
+            operation_detail=message_text,
+        )
         scan.provider_operation_status = "failed"
         scan.provider_operation_detail = (
             f"Provider operation failed ({error_class}): {message_text} "

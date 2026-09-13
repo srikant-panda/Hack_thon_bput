@@ -99,3 +99,15 @@ Preparation (one-time): backend running on `http://localhost:8000` (`uvicorn app
 3. Toggle **Live Alerts** in the topbar: new alerts inserted into Supabase stream to the open Dashboard/Alerts page as toasts with automatic refresh (Supabase Realtime).
 4. Ask the **SOC Assistant** (sidebar): "Show critical alerts" or "What should I investigate first?" — answers cite alert IDs from the live database.
 5. Open **Reports** to export the current state as JSON/CSV evidence.
+
+---
+
+## Security History & flagged-email review (Phase 5, ~2 minutes)
+
+1. **Connect + scan:** on **Email Connectors**, connect a Gmail mailbox and press **Scan Recent Mail**. Each analyzed message records a `scan_verdict` event; high/critical verdicts are auto-quarantined at Gmail and their sender auto-blocked via a filter.
+2. **Review a flagged email:** open **Quarantine Queue** and press **Review** on a row. The drawer shows the full verbose analysis (severity gauge, why-this-verdict, per-engine evidence tables), then the **event chain timeline** — e.g. `scan verdict (system) → quarantine (system) → sender block (system)` — and the available manual actions (**Release to Inbox / Keep Quarantined / Move to Trash**, gated by connector readiness and the permanent-delete setting).
+3. **Act and watch history:** press **Keep Quarantined**, then open **Security History**. The chain now includes your `keep` event with an `USER` actor badge next to the earlier `SYSTEM` badges; every row shows the real provider operation status.
+4. **Filter the record:** use the filter bar (event type, actor, severity, sender search, date range) — e.g. `actor=system` shows only automated actions; the sender search narrows to one mailbox threat actor.
+5. **Audit distinction:** open **Audit Logs** and filter by actor — `SYSTEM` rows are automated policy actions, `USER` rows are manual, `SCHEDULER` rows are expiry releases; the same operation appears in both Security History and the audit trail.
+6. **Session-only chat (privacy demo):** open the **SOC Assistant**, ask two questions, close the tab and reopen — the conversation is gone (sessionStorage per-tab, destroyed on close). Meanwhile the same conversation produced only an intent-class audit row (`[OPS_CRITICAL]`), never message content.
+7. **Expiry (if configured):** with a 3-hour quarantine setting, the scheduler's next pass returns expired mail to the inbox and logs `release`/`sender_expiry` events with the `SCHEDULER` actor badge.

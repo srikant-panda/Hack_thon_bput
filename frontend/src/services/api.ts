@@ -28,7 +28,9 @@ import type {
   MessageAnalysis,
   ConnectorSettings,
   QuarantinedItem,
-  BlockedSender,} from '../types';
+  BlockedSender,
+  SecurityEventRecord,
+  QuarantineReview,} from '../types';
 import * as mockApi from './mockApi';
 import { db, addAuditLog } from './mockData';
 import { ApiError, apiFetch } from './http';
@@ -305,9 +307,10 @@ export async function listResponseHistory(): Promise<ResponseExecution[]> {
 // Audit logs
 // ---------------------------------------------------------------------------
 
-export async function listAuditLogs(): Promise<AuditLog[]> {
+export async function listAuditLogs(actorType?: string): Promise<AuditLog[]> {
   if (USE_MOCK) return mockApi.mockListAuditLogs();
-  const rows = await apiFetch('/audit/logs?limit=200');
+  const suffix = actorType ? `&actor_type=${encodeURIComponent(actorType)}` : '';
+  const rows = await apiFetch(`/audit/logs?limit=200${suffix}`);
   return (Array.isArray(rows) ? rows : []).map(mapAuditLog);
 }
 
@@ -730,6 +733,47 @@ export async function listBlockedSenders(): Promise<BlockedSender[]> {
 export async function unblockSender(blockId: string): Promise<string> {
   if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   const res = await apiFetch(`/enforcement/blocked-senders/${blockId}/release`, { method: 'POST' });
+  return res.status as string;
+}
+
+
+// --- Security history (Phase 5) ---
+
+export interface SecurityHistoryFilters {
+  event_type?: string;
+  actor_type?: string;
+  severity?: string;
+  sender_email?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listSecurityHistory(
+  filters: SecurityHistoryFilters = {},
+): Promise<{ items: SecurityEventRecord[]; total: number; limit: number; offset: number }> {
+  if (USE_MOCK) return { items: [], total: 0, limit: filters.limit ?? 50, offset: filters.offset ?? 0 };
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+  }
+  return (await apiFetch(`/security-history?${params.toString()}`)) as {
+    items: SecurityEventRecord[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
+}
+
+export async function getQuarantineReview(itemId: string): Promise<QuarantineReview> {
+  if (USE_MOCK) throw new Error('DEMO MODE — history requires a real backend');
+  return (await apiFetch(`/quarantine/${itemId}/review`)) as QuarantineReview;
+}
+
+export async function keepQuarantined(itemId: string): Promise<string> {
+  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
+  const res = await apiFetch(`/enforcement/quarantine/${itemId}/keep`, { method: 'POST' });
   return res.status as string;
 }
 

@@ -22,6 +22,7 @@ async def log_action(
     action: str,
     resource: Optional[str] = None,
     details: Optional[str] = None,
+    actor_type: str = "user",  # user | system | scheduler (Phase 5)
 ) -> None:
     """Insert an audit log entry for a state-changing operation."""
     try:
@@ -29,6 +30,7 @@ async def log_action(
             id=str(uuid.uuid4()),
             organization_id=tenant.organization_id if tenant else None,
             owner_user_id=tenant.owner_user_id if tenant else None,
+            actor_type=actor_type,
             user_id=user_id,
             user_name=user_name or "System",
             action=action,

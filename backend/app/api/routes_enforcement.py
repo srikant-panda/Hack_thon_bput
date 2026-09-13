@@ -21,6 +21,7 @@ from app.services.action_engine import get_or_create_settings
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
 from app.services.email_providers.base import EmailProviderError
 from app.services.email_providers.gmail import gmail_provider
+from app.services.security_history_service import record_event
 
 logger = logging.getLogger("cyberguard.enforcement.api")
 
@@ -186,6 +187,24 @@ async def release_quarantined(
     item.status = "released"
     item.last_error = None
     await db.commit()
+    await record_event(
+        db,
+        owner_user_id=user.id,
+        event_type="release",
+        actor_type="user",
+        connector_id=item.connector_id,
+        provider="gmail",
+        provider_message_id=item.provider_message_id,
+        sender_email=item.sender_email,
+        subject=(item.scan_result_json or {}).get("subject"),
+        severity=item.severity,
+        score=(item.scan_result_json or {}).get("overall_score"),
+        action_requested="release",
+        action_performed="release_message",
+        operation_status="success",
+        operation_detail="User released the message back to the inbox",
+        quarantined_item_id=item.id,
+    )
     return EnforcementActionResponse(id=item.id, status=item.status, provider_operation_status="success",
                                      message="Message released back to the inbox.")
 
@@ -225,12 +244,62 @@ async def delete_quarantined(
     item.status = "deleted"
     item.last_error = None
     await db.commit()
+    await record_event(
+        db,
+        owner_user_id=user.id,
+        event_type="delete",
+        actor_type="user",
+        connector_id=item.connector_id,
+        provider="gmail",
+        provider_message_id=item.provider_message_id,
+        sender_email=item.sender_email,
+        subject=(item.scan_result_json or {}).get("subject"),
+        severity=item.severity,
+        score=(item.scan_result_json or {}).get("overall_score"),
+        action_requested="delete",
+        action_performed="permanent_delete" if permanent else "trash",
+        operation_status="success",
+        operation_detail="Message permanently deleted at Gmail." if permanent else "Message moved to Gmail trash.",
+        quarantined_item_id=item.id,
+    )
     return EnforcementActionResponse(
         id=item.id,
         status=item.status,
         provider_operation_status="success",
         message="Message permanently deleted." if permanent else "Message moved to Gmail trash.",
     )
+
+
+@router.post("/quarantine/{item_id}/keep", response_model=EnforcementActionResponse)
+async def keep_quarantined(
+    item_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EnforcementActionResponse:
+    """Keep a quarantined item as-is (manual review outcome, no provider action)."""
+    item = await _load_item(db, item_id, user)
+    if item.status != "quarantined":
+        raise AppError(f"Item is not quarantined (status: {item.status}).", code="invalid_state", status_code=400)
+    await record_event(
+        db,
+        owner_user_id=user.id,
+        event_type="keep",
+        actor_type="user",
+        connector_id=item.connector_id,
+        provider="gmail",
+        provider_message_id=item.provider_message_id,
+        sender_email=item.sender_email,
+        subject=(item.scan_result_json or {}).get("subject"),
+        severity=item.severity,
+        score=(item.scan_result_json or {}).get("overall_score"),
+        action_requested="keep",
+        action_performed="none",
+        operation_status="success",
+        operation_detail="User reviewed the item and kept it quarantined; no mailbox change",
+        quarantined_item_id=item.id,
+    )
+    return EnforcementActionResponse(id=item.id, status=item.status, provider_operation_status="success",
+                                     message="Item kept in quarantine.")
 
 
 @router.get("/blocked-senders", response_model=BlockedSenderListResponse)
@@ -281,5 +350,20 @@ async def release_blocked_sender(
     block.status = "released"
     block.last_error = None
     await db.commit()
+    await record_event(
+        db,
+        owner_user_id=user.id,
+        event_type="sender_release",
+        actor_type="user",
+        connector_id=block.connector_id,
+        provider="gmail",
+        sender_email=block.sender_email,
+        action_requested="unblock_sender",
+        action_performed="delete_sender_rule" if block.provider_rule_id else "none",
+        operation_status="success",
+        operation_detail=(f"Gmail filter {block.provider_rule_id} removed; " if block.provider_rule_id else "No filter existed (rule creation had failed); ")
+                         + f"{block.sender_email} unblocked",
+        blocked_sender_id=block.id,
+    )
     return EnforcementActionResponse(id=block.id, status=block.status, provider_operation_status="success",
                                      message=f"Sender {block.sender_email} unblocked.")

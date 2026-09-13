@@ -39,6 +39,7 @@ from app.services.email_providers.base import EmailProviderError
 from app.services.email_providers.gmail import gmail_provider
 from app.services.email_providers.registry import get_registry
 from app.services.mail_scanner import scan_message
+from app.services.security_history_service import record_event
 
 logger = logging.getLogger("cyberguard.connectors.api")
 
@@ -270,7 +271,31 @@ async def scan_connector_messages(
         pairs: list[tuple[NormalizedMessage, ScanResult]] = []
         for message_id in message_ids:
             message = await gmail_provider.get_message(access_token, message_id)
-            pairs.append((message, await scan_message(message)))
+            scan = await scan_message(message)
+            pairs.append((message, scan))
+            # Security history: one scan_verdict per analyzed message (Phase 5).
+            await record_event(
+                db,
+                tenant=None,
+                owner_user_id=user.id,
+                event_type="scan_verdict",
+                actor_type="system",
+                connector=connector,
+                provider_message_id=message.provider_message_id,
+                sender_email=message.sender,
+                subject=message.subject,
+                severity=scan.overall_severity,
+                score=scan.overall_score,
+                explanation=scan.overall_explanation,
+                indicators=[
+                    {"name": ind.name, "value": ind.value, "weight": ind.weight}
+                    for analysis in scan.feature_analyses
+                    for ind in analysis.indicators
+                ],
+                action_requested=scan.recommended_action,
+                operation_status="success",
+                operation_detail=f"{len(scan.feature_analyses)} engine(s) analyzed the message",
+            )
     except (EmailProviderError, TokenRefreshError) as exc:
         raise _provider_error(exc) from exc
 

@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Inbox, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Archive,
+  CheckCircle2,
+  History,
+  Inbox,
+  Loader2,
+  RefreshCw,
+  ShieldOff,
+  Trash2,
+  X,
+} from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
 import VerboseResultPanel, { SEVERITY_STYLES } from '../components/common/VerboseResultPanel';
 import * as api from '../services/api';
-import type { QuarantinedItem } from '../types';
+import type { QuarantineReview, QuarantinedItem } from '../types';
 
 const STATUS_STYLES: Record<string, string> = {
   quarantined: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/30',
@@ -26,6 +37,8 @@ export default function QuarantineQueue() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<QuarantinedItem | null>(null);
+  const [review, setReview] = useState<QuarantineReview | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -42,6 +55,39 @@ export default function QuarantineQueue() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const openReview = useCallback(async (item: QuarantinedItem) => {
+    setSelected(item);
+    setReview(null);
+    setReviewLoading(true);
+    setError(null);
+    try {
+      setReview(await api.getQuarantineReview(item.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load review');
+    } finally {
+      setReviewLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // no-op: kept for symmetric hooks usage
+  }, []);
+
+  const handleKeep = async (item: QuarantinedItem) => {
+    setActionId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.keepQuarantined(item.id);
+      setNotice('Item kept in quarantine.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Keep failed');
+    } finally {
+      setActionId(null);
+    }
+  };
 
   const handleRelease = async (item: QuarantinedItem) => {
     setActionId(item.id);
@@ -157,10 +203,11 @@ export default function QuarantineQueue() {
                 <div className="flex flex-shrink-0 items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelected(item)}
-                    className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-800/60"
+                    onClick={() => openReview(item)}
+                    className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-800/60"
                   >
-                    Why?
+                    <History className="h-3.5 w-3.5" />
+                    Review
                   </button>
                   {item.status === 'quarantined' && (
                     <>
@@ -211,10 +258,120 @@ export default function QuarantineQueue() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            {selected.scan_result && Object.keys(selected.scan_result).length > 0 ? (
-              <VerboseResultPanel scan={selected.scan_result} />
-            ) : (
-              <p className="text-sm text-zinc-500">No stored analysis for this item.</p>
+            {reviewLoading && (
+              <div className="flex items-center gap-2 text-sm text-zinc-500">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading review…
+              </div>
+            )}
+
+            {!reviewLoading && review && (
+              <>
+                <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                  <span className="font-mono text-xs text-zinc-400">
+                    {review.message.sender_email} · status{' '}
+                    <span className="text-zinc-200">{review.item.status}</span>
+                    {review.item.expires_at ? ` · expires ${new Date(review.item.expires_at).toLocaleString()}` : ' · manual expiry'}
+                  </span>
+                  {review.available_actions.connector_ready ? (
+                    <span className="flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] text-emerald-400 ring-1 ring-emerald-500/30">
+                      <CheckCircle2 className="h-3 w-3" /> connector ready
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] text-amber-400 ring-1 ring-amber-500/30">
+                      <ShieldOff className="h-3 w-3" /> connector unavailable
+                    </span>
+                  )}
+                </div>
+
+                {review.scan_result && Object.keys(review.scan_result).length > 0 ? (
+                  <VerboseResultPanel scan={review.scan_result} />
+                ) : (
+                  <p className="text-sm text-zinc-500">No stored analysis for this item.</p>
+                )}
+
+                {/* Event chain timeline */}
+                <div className="mt-5">
+                  <h4 className="mb-2 font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                    Event chain ({review.event_chain.length})
+                  </h4>
+                  <div className="space-y-0">
+                    {review.event_chain.map((event, idx) => (
+                      <div key={event.id} className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className={`mt-1.5 h-2.5 w-2.5 rounded-full ${idx === review.event_chain.length - 1 ? 'bg-red-500' : 'bg-zinc-600'}`} />
+                          {idx < review.event_chain.length - 1 && <div className="h-full w-px flex-1 bg-zinc-800" />}
+                        </div>
+                        <div className="pb-4">
+                          <p className="font-mono text-xs font-semibold text-zinc-200">
+                            {event.event_type.replace(/_/g, ' ')}
+                            <span className={`ml-2 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                              event.actor_type === 'system'
+                                ? 'bg-red-500/15 text-red-400'
+                                : event.actor_type === 'scheduler'
+                                  ? 'bg-blue-500/10 text-blue-400'
+                                  : 'bg-zinc-800 text-zinc-300'
+                            }`}>
+                              {event.actor_type}
+                            </span>
+                            {event.operation_status && (
+                              <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[9px] uppercase ${
+                                event.operation_status === 'success' ? 'text-emerald-400' : 'text-amber-400'
+                              }`}>
+                                {event.operation_status.replace(/_/g, ' ')}
+                              </span>
+                            )}
+                          </p>
+                          {event.operation_detail && (
+                            <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">{event.operation_detail}</p>
+                          )}
+                          <p className="mt-0.5 font-mono text-[10px] text-zinc-600">
+                            {event.created_at ? new Date(event.created_at).toLocaleString() : '—'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Manual actions gated by available_actions */}
+                {review.item.status === 'quarantined' && review.available_actions.connector_ready && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {review.available_actions.release && (
+                      <button
+                        type="button"
+                        onClick={() => handleRelease(selected)}
+                        disabled={actionId === selected.id}
+                        className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-50"
+                      >
+                        {actionId === selected.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Inbox className="h-3.5 w-3.5" />}
+                        Release to Inbox
+                      </button>
+                    )}
+                    {review.available_actions.keep && (
+                      <button
+                        type="button"
+                        onClick={() => handleKeep(selected)}
+                        disabled={actionId === selected.id}
+                        className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-800/60 disabled:opacity-50"
+                      >
+                        {actionId === selected.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+                        Keep Quarantined
+                      </button>
+                    )}
+                    {review.available_actions.delete && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(selected)}
+                        disabled={actionId === selected.id}
+                        className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        {actionId === selected.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        {review.available_actions.delete_mode === 'permanent' ? 'Delete Permanently' : 'Move to Trash'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

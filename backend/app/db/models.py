@@ -312,6 +312,8 @@ class AuditLog(Base):
     )
     user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     user_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # user | system | scheduler — distinguishes automated vs user-initiated.
+    actor_type: Mapped[str] = mapped_column(String(16), default="user")
     action: Mapped[str] = mapped_column(String(255), nullable=False)
     resource: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -503,6 +505,47 @@ class BlockedSender(Base):
     # blocked | released | expired
     status: Mapped[str] = mapped_column(String(32), default="blocked", index=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class SecurityEvent(Base):
+    """Permanent security history: one row per real security event / provider
+    operation (Phase 5). AI chat content is NEVER written here."""
+
+    __tablename__ = "security_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    # scan_verdict | quarantine | release | keep | delete | sender_block |
+    # sender_release | sender_expiry | connector_connect |
+    # connector_disconnect | connector_test
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
+    connector_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("email_connector_accounts.id", ondelete="SET NULL"), nullable=True,
+    )
+    provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    provider_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    sender_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    severity: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    indicators: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(PortableJSON, nullable=True)
+    action_requested: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    action_performed: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # user | system | scheduler
+    actor_type: Mapped[str] = mapped_column(String(16), nullable=False, default="user", index=True)
+    # success | failed | unsupported | insufficient_scope | reauth_required
+    operation_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    operation_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    quarantined_item_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("quarantined_items.id", ondelete="SET NULL"), nullable=True,
+    )
+    blocked_sender_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("blocked_senders.id", ondelete="SET NULL"), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
 
 class ActionExecution(Base):

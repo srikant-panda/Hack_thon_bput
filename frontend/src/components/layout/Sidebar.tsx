@@ -42,6 +42,7 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
   { to: '/email-connectors', label: 'Email Connectors', icon: Mail },
   { to: '/quarantine', label: 'Quarantine Queue', icon: PackageOpen },
   { to: '/blocked-senders', label: 'Blocked Senders', icon: Ban },
+  { to: '/security-history', label: 'Security History', icon: ScrollText },
   { to: '/organization', label: 'Organization & Team', icon: Building2 },
   { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText },
   { to: '/reports', label: 'Reports', icon: FileBarChart },

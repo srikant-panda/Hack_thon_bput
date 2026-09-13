@@ -115,3 +115,17 @@ consequences. Newest entries at the bottom.
   The Phase 3 deferral semantics remain only where enforcement is disabled or
   unnecessary — a successful action now reports `provider_operation_status =
   "success"` with the concrete Gmail operations performed.
+
+- **2026-09-13 — Dual-write security history + audit with actor distinction; chat excluded from permanent history (Phase 5).**
+  `record_event` writes one `security_events` row AND a matching `audit_logs`
+  row with the same `actor_type` (user | system | scheduler), guaranteeing the
+  two ledgers never disagree about who acted. Writers must pass the real
+  provider operation outcome — history defaults are success-free by design.
+  The review view (`/quarantine/{id}/review`) assembles the ordered event
+  chain per message and computes available actions from live state (item
+  status, connector readiness, permanent-delete setting) rather than offering
+  static buttons. AI chat remains ephemeral: sessionStorage-only under a
+  per-tab key, destroyed on tab close, and the assistant's audit entry now
+  records the intent class only — chat content is never permanent history.
+  Migration `0006` backfills `audit_logs.actor_type='user'`; the history
+  backfill script is idempotent against pre-Phase-5 enforcement rows.

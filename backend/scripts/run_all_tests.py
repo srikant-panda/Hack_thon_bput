@@ -403,6 +403,14 @@ async def run_tests():
 
     await run_enforcement_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 15. Phase 5 — Security History, Audit & User Review
+    # -----------------------------------------------------------------------
+    print("\n[Suite 15] Phase 5 — Security History & Review")
+    from test_security_history import run_security_history_tests
+
+    await run_security_history_tests(runner)
+
     return runner.report()
 
 

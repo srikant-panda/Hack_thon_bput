@@ -180,6 +180,7 @@ export interface AuditLog {
   resource: string;
   details: string;
   timestamp: string;
+  actor_type?: 'user' | 'system' | 'scheduler';
 }
 
 export interface DashboardSummary {
@@ -492,4 +493,68 @@ export interface BlockedSender {
   expires_at: string | null;
   status: string;
   last_error: string | null;
+}
+
+// --- Security history (Phase 5) ---
+
+export type SecurityEventType =
+  | 'scan_verdict' | 'quarantine' | 'release' | 'keep' | 'delete'
+  | 'sender_block' | 'sender_release' | 'sender_expiry'
+  | 'connector_connect' | 'connector_disconnect' | 'connector_test';
+export type SecurityActorType = 'user' | 'system' | 'scheduler';
+
+export interface SecurityEventRecord {
+  id: string;
+  event_type: string;
+  connector_id: string | null;
+  provider: string | null;
+  provider_message_id: string | null;
+  sender_email: string | null;
+  subject: string | null;
+  severity: string | null;
+  score: number | null;
+  explanation: string | null;
+  indicators: { name: string; value: string; weight: number }[];
+  action_requested: string | null;
+  action_performed: string | null;
+  actor_type: SecurityActorType;
+  operation_status: string | null;
+  operation_detail: string | null;
+  quarantined_item_id: string | null;
+  blocked_sender_id: string | null;
+  created_at: string | null;
+}
+
+export interface ReviewAvailableActions {
+  release: boolean;
+  keep: boolean;
+  delete: boolean;
+  delete_mode: 'trash' | 'permanent' | null;
+  connector_ready: boolean;
+}
+
+export interface QuarantineReview {
+  item: {
+    id: string;
+    connector_id: string;
+    provider_message_id: string;
+    sender_email: string;
+    reason: string;
+    severity: string;
+    status: string;
+    quarantined_at: string | null;
+    expires_at: string | null;
+    last_error: string | null;
+  };
+  message: {
+    provider_message_id: string | null;
+    provider: string | null;
+    sender_email: string | null;
+    subject: string | null;
+    body_preview: string | null;
+    received_at: string | null;
+  };
+  scan_result: ScanResult | null;
+  event_chain: SecurityEventRecord[];
+  available_actions: ReviewAvailableActions;
 }

@@ -244,6 +244,6 @@ async def chat_with_assistant(
         user_name=user_name,
         action="SOC Assistant query",
         resource="assistant",
-        details=f"[{intent}] {user_message[:200]}",
+        details=f"[{intent}]",
     )
     return {"reply": reply, "context_used": context_used}

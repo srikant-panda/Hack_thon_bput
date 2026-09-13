@@ -12,6 +12,7 @@ from app.db.models import ConnectorOperationLog, EmailConnectorAccount
 from app.services.connectors.token_manager import get_valid_access_token
 from app.services.email_providers.base import ConnectorStatus
 from app.services.email_providers.gmail import GOOGLE_REVOKE_URL, gmail_provider
+from app.services.security_history_service import record_event
 
 logger = logging.getLogger("cyberguard.connectors")
 
@@ -109,6 +110,15 @@ async def test_connector(
             message=message,
             provider_error_code=getattr(exc, "provider_code", None),
         )
+        await record_event(
+            db,
+            owner_user_id=connector.owner_user_id,
+            event_type="connector_test",
+            actor_type="user",
+            connector=connector,
+            operation_status=error_class if error_class in ("failed", "insufficient_scope", "reauth_required") else "failed",
+            operation_detail=message,
+        )
         await db.commit()
         return {"ok": False, "error_class": error_class, "message": message}
 
@@ -125,6 +135,15 @@ async def test_connector(
         status="success",
         connector_id=connector.id,
         message=f"Connection OK for {result.get('email_address')}",
+    )
+    await record_event(
+        db,
+        owner_user_id=connector.owner_user_id,
+        event_type="connector_test",
+        actor_type="user",
+        connector=connector,
+        operation_status="success",
+        operation_detail=f"Connection test OK for {result.get('email_address')}",
     )
     await db.commit()
     return {
@@ -178,6 +197,15 @@ async def disconnect_connector(
         status="success" if not revoke_note else "failed",
         connector_id=connector.id,
         message=revoke_note or f"Disconnected {connector.provider_email}",
+    )
+    await record_event(
+        db,
+        owner_user_id=connector.owner_user_id,
+        event_type="connector_disconnect",
+        actor_type="user",
+        connector=connector,
+        operation_status="success" if not revoke_note else "failed",
+        operation_detail=revoke_note or f"Disconnected {connector.provider_email}; tokens cleared",
     )
     await db.commit()
 

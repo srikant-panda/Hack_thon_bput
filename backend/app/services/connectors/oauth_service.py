@@ -15,6 +15,7 @@ from app.core.crypto import encrypt_secret
 from app.db.admin import consume_connector_oauth_state, log_connector_operation_admin
 from app.db.models import ConnectorOAuthState, EmailConnectorAccount
 from app.services.email_providers.base import ConnectorStatus
+from app.services.security_history_service import record_event
 from app.services.email_providers.gmail import (
     GMAIL_SCOPE,
     GMAIL_SETTINGS_SCOPE,
@@ -225,4 +226,17 @@ async def handle_gmail_callback(code: str, state: str) -> EmailConnectorAccount:
         connector_id=connector_id,
         message=f"Connected {provider_email}",
     )
+    from app.db.admin import _get_admin_session_maker
+
+    async with _get_admin_session_maker()() as admin_db:
+        await record_event(
+            admin_db,
+            owner_user_id=owner_user_id,
+            event_type="connector_connect",
+            actor_type="user",
+            connector_id=connector_id,
+            provider="gmail",
+            operation_status="success",
+            operation_detail=f"Gmail mailbox {provider_email} connected (scopes: {', '.join(scopes)})",
+        )
     return connector
