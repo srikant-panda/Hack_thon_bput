@@ -42,6 +42,7 @@ class CurrentUser(BaseModel):
     full_name: Optional[str] = None
     username: Optional[str] = None
     account_type: str = "user"
+    notification_email: Optional[str] = None
 
 
 class TenantContext(BaseModel):
@@ -196,6 +197,7 @@ async def get_current_user(
         full_name=user.full_name,
         username=user.username,
         account_type=user.account_type or "user",
+        notification_email=user.notification_email,
     )
 
 

@@ -11,6 +11,7 @@ import ComingSoon from './pages/ComingSoon';
 import EmailConnectors from './pages/EmailConnectors';
 import BlockedSenders from './pages/BlockedSenders';
 import SecurityHistory from './pages/SecurityHistory';
+import NotificationLog from './pages/NotificationLog';
 import { useAuthStore } from './store/authStore';
 import Dashboard from './pages/Dashboard';
 import ApprovalQueue from './pages/ApprovalQueue';
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/email-connectors" element={<EmailConnectors />} />
           <Route path="/blocked-senders" element={<BlockedSenders />} />
           <Route path="/security-history" element={<SecurityHistory />} />
+          <Route path="/notification-log" element={<NotificationLog />} />
           <Route path="/approvals" element={<ApprovalQueue />} />
           <Route path="/quarantine" element={<QuarantineQueue />} />
           <Route path="/blocklist" element={<BlockList />} />

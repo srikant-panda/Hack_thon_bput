@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Info, Lock, Server, Shield, User } from 'lucide-react';
+import { AlertTriangle, Bell, CheckCircle2, Info, Loader2, Lock, Server, Shield, User } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import PageHeader from '../components/common/PageHeader';
+import * as api from '../services/api';
 import { SEVERITY_COLORS } from '../theme';
 import { getSeverityFromScore } from '../services/mockEngine';
 
@@ -16,10 +17,73 @@ const BANDS: [number, number, string][] = [
 export default function Settings() {
   const user = useAuthStore((s) => s.user);
   const [mockMode] = useState(true);
+  const notificationEmail = useAuthStore((s) => s.notificationEmail);
+  const setNotificationEmailState = useAuthStore((s) => s.fetchUserContext);
+  const [notifEmail, setNotifEmail] = useState(notificationEmail ?? '');
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifMsg, setNotifMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const saveNotificationEmail = async () => {
+    setNotifSaving(true);
+    setNotifMsg(null);
+    try {
+      const email = notifEmail.trim() || null;
+      await api.updateNotificationEmail(email);
+      await setNotificationEmailState();
+      setNotifMsg({
+        ok: true,
+        text: email
+          ? `Notifications will be sent to ${email}.`
+          : 'Notification email cleared — no alerts will be sent.',
+      });
+    } catch (err) {
+      setNotifMsg({ ok: false, text: err instanceof Error ? err.message : 'Failed to save' });
+    } finally {
+      setNotifSaving(false);
+    }
+  };
 
   return (
     <div className="max-w-3xl space-y-5">
       <PageHeader title="Settings" description="Profile, environment and detection reference configuration." />
+
+      {/* Email notifications (Phase 7) */}
+      <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/60 p-5 backdrop-blur">
+        <div className="mb-4 flex items-center gap-2">
+          <Bell className="h-4 w-4 text-red-400" />
+          <h3 className="text-sm font-semibold text-zinc-100">Email Notifications</h3>
+        </div>
+        <p className="mb-3 text-xs leading-relaxed text-zinc-400">
+          Register the address that receives CYBERGUARD security alerts
+          (quarantines, sender blocks, releases). This is{' '}
+          <span className="text-zinc-200">separate from any connected mailbox</span> —
+          system notifications are never sent to your Gmail account.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="email"
+            value={notifEmail}
+            onChange={(e) => setNotifEmail(e.target.value)}
+            placeholder="alerts@yourdomain.com"
+            className="min-w-64 flex-1 rounded-lg border border-zinc-700/60 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-red-500/60"
+          />
+          <button
+            type="button"
+            onClick={saveNotificationEmail}
+            disabled={notifSaving}
+            className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-60"
+          >
+            {notifSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+            Save
+          </button>
+        </div>
+        {notifMsg && (
+          <p className={`mt-2 flex items-center gap-1.5 text-xs ${notifMsg.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+            {notifMsg.ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+            {notifMsg.text}
+          </p>
+        )}
+      </div>
 
       {/* Profile */}
       <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/60 p-5 backdrop-blur">

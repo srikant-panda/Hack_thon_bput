@@ -90,6 +90,24 @@ async def record_event(
         logger.exception("Failed to record security event %s", event_type)
         return event
     await db.refresh(event)
+
+    # Phase 7: high-severity events trigger an email notification to the
+    # user's registered notification_email (never a connected mailbox).
+    try:
+        from app.services.notification_service import maybe_notify
+
+        await maybe_notify(
+            db,
+            owner_user_id=owner,
+            event_type=event_type,
+            severity=severity,
+            sender_email=sender_email,
+            subject=subject,
+            operation_status=operation_status,
+            operation_detail=operation_detail,
+        )
+    except Exception:  # noqa: BLE001 - notifications must not break operations
+        logger.exception("Notification hook failed for %s", event_type)
     return event
 
 

@@ -23,8 +23,8 @@ from sqlalchemy import select
 
 from app.db.admin import _get_admin_session_maker
 from app.db.models import BlockedSender, ConnectorOperationLog, QuarantinedItem
+from app.services.email_providers import get_provider
 from app.services.email_providers.base import EmailProviderError
-from app.services.email_providers.gmail import gmail_provider
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
 from app.services.security_history_service import record_event
 
@@ -70,8 +70,9 @@ async def run_expiry_once() -> dict:
         for item in items:
             try:
                 token, connector = await _connector_token(db, item.connector_id, item.owner_user_id)
-                label_id = await gmail_provider.ensure_quarantine_label(token)
-                await gmail_provider.release_message(token, item.provider_message_id, label_id)
+                provider = get_provider(connector.provider)
+                label_id = await provider.ensure_quarantine_label(token)
+                await provider.release_message(token, item.provider_message_id, label_id)
                 item.status = "expired"
                 item.last_error = None
                 db.add(
@@ -123,8 +124,9 @@ async def run_expiry_once() -> dict:
         for block in blocks:
             try:
                 token, connector = await _connector_token(db, block.connector_id, block.owner_user_id)
+                provider = get_provider(connector.provider)
                 if block.provider_rule_id:
-                    await gmail_provider.delete_sender_rule(token, block.provider_rule_id)
+                    await provider.delete_sender_rule(token, block.provider_rule_id)
                 block.status = "expired"
                 block.last_error = None
                 db.add(

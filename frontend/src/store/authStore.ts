@@ -29,6 +29,8 @@ interface AuthState {
   role: Role;
   fullName: string | null;
   username: string | null;
+  /** Address that receives system notifications (never a connected mailbox). */
+  notificationEmail: string | null;
   /** Organization accounts are frozen server-side (ORG_ENABLED=false). */
   orgEnabled: boolean;
   organizations: Organization[];
@@ -78,6 +80,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   role: 'analyst',
   fullName: null,
   username: null,
+  notificationEmail: null,
   orgEnabled: false,
   organizations: [],
   activeOrganization: null,
@@ -277,6 +280,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       role: 'analyst',
       fullName: null,
       username: null,
+      notificationEmail: null,
       orgEnabled: false,
       organizations: [],
       activeOrganization: null,
@@ -319,6 +323,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({
           orgEnabled,
           username: data.username ?? null,
+          notificationEmail: data.notification_email ?? null,
           organizations: orgs,
           // Personal mode: no active organization; org rows stay frozen.
           activeOrganization: active || null,

@@ -558,3 +558,16 @@ export interface QuarantineReview {
   event_chain: SecurityEventRecord[];
   available_actions: ReviewAvailableActions;
 }
+
+// --- Event email notifications (Phase 7) ---
+
+export interface NotificationLogEntry {
+  id: string;
+  event_type: string;
+  recipient_email: string;
+  subject: string;
+  status: 'sent' | 'failed';
+  backend: 'db_log' | 'smtp';
+  error_detail: string | null;
+  created_at: string | null;
+}

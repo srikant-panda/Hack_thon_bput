@@ -129,3 +129,19 @@ consequences. Newest entries at the bottom.
   records the intent class only — chat content is never permanent history.
   Migration `0006` backfills `audit_logs.actor_type='user'`; the history
   backfill script is idempotent against pre-Phase-5 enforcement rows.
+
+- **2026-09-13 — 14-method provider contract with capability gating, and DB-logged email notifications for demo reliability (Phase 6-7).**
+  The `EmailProvider` contract was finalized to the Excalidraw 14 methods
+  with a `capabilities` property exposing `supports_*` boolean flags; the
+  enforcement engine and scheduler resolve providers through
+  `get_provider(connector.provider)` and consult capabilities before acting
+  (a provider without sender-rule support skips filter creation and says so).
+  An in-memory `MockEmailProvider` with configurable failure flags proves the
+  engine is Gmail-independent. Notifications deliberately use a DB-logged
+  delivery backend as the default: the rendered email is persisted to
+  `notification_logs` (status sent/failed, `backend=db_log`), making the demo
+  deterministic with zero external dependency; optional SMTP is best-effort
+  with automatic fallback. The recipient is always the user-registered
+  `users.notification_email` — connected mailboxes are never used for system
+  notifications (privacy/spam boundary). `backend` was added to the spec's
+  notification_logs columns to record the actual delivery path.

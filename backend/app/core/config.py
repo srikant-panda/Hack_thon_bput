@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     CONNECTOR_OAUTH_STATE_TTL_SECONDS: int = 600
     GMAIL_CONNECTOR_ENABLED: bool = True
 
+    # --- Event email notifications (Phase 7) ---
+    # Empty SMTP host = DB-logged delivery backend (hackathon-demo safe):
+    # the email is rendered and persisted to notification_logs.
+    # When set, SMTP delivery is attempted best-effort and falls back to
+    # DB logging on any failure so the demo never crashes.
+    NOTIFICATION_SMTP_HOST: str = ""
+    NOTIFICATION_SMTP_PORT: int = 587
+    NOTIFICATION_FROM_ADDRESS: str = "cyberguard-alerts@localhost"
+    NOTIFICATION_SMTP_USERNAME: str = ""
+    NOTIFICATION_SMTP_PASSWORD: str = ""
+
     # Multi-Provider Orchestration (Groq, Gemini, OpenRouter)
     LLM_PROVIDERS: str = "groq,gemini,openrouter"
     LLM_COOLDOWN_SECONDS: int = 60

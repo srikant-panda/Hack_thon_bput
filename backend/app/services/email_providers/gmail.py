@@ -40,16 +40,23 @@ _MEDIA_MIME_PREFIXES = ("image/", "audio/", "video/")
 
 class GmailProvider:
     provider = "gmail"
-    capabilities = ProviderCapability(
+    quarantine_label_name = "CYBERGUARD-Quarantine"
+
+    _capability = ProviderCapability(
         read_messages=True,
         read_attachments=True,
         modify_labels=True,
         quarantine=True,
         trash=True,
         permanent_delete=True,
-        sender_rules=False,
+        sender_rules=True,
         send_mail=True,
     )
+
+    @property
+    def capabilities(self) -> dict:
+        """True capability flags (Phase 6): engines query, never guess."""
+        return self._capability.flags()
 
     def __init__(self, http_client: httpx.AsyncClient | None = None):
         self._client = http_client or httpx.AsyncClient(timeout=_TIMEOUT)
@@ -250,10 +257,83 @@ class GmailProvider:
         )
 
     # ------------------------------------------------------------------
+    # Phase 6 — remaining contract methods
+    # ------------------------------------------------------------------
+
+    async def authorize(self, *, redirect_uri: str, state: str) -> dict:
+        """Build the Google consent URL (state persistence is the caller's job)."""
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        params = {
+            "client_id": settings.GOOGLE_GMAIL_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": f"{GMAIL_SCOPE} {GMAIL_SETTINGS_SCOPE}",
+            "access_type": "offline",
+            "prompt": "consent",
+            "include_granted_scopes": "true",
+            "state": state,
+        }
+        from urllib.parse import urlencode
+
+        return {"authorization_url": f"{GOOGLE_AUTH_URL}?{urlencode(params)}"}
+
+    async def refresh_token(self, refresh_token: str) -> dict:
+        """Exchange a refresh token at the Google token endpoint."""
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            response = await client.post(
+                GOOGLE_TOKEN_URL,
+                data={
+                    "client_id": settings.GOOGLE_GMAIL_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_GMAIL_CLIENT_SECRET,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+            )
+        if response.status_code != 200:
+            raise self._error(response.status_code, response.json() if response.content else {})
+        return response.json()
+
+    async def get_attachment(self, access_token: str, message_id: str, attachment_id: str) -> dict:
+        """Fetch attachment content (base64url data + metadata)."""
+        return await self._request(
+            "GET",
+            f"{GMAIL_API_BASE}/users/me/messages/{message_id}/attachments/{attachment_id}",
+            access_token,
+        )
+
+    async def create_draft(self, access_token: str, raw_mime: str, thread_id: str | None = None) -> dict:
+        message: dict = {"raw": raw_mime}
+        if thread_id:
+            message["threadId"] = thread_id
+        return await self._request(
+            "POST", f"{GMAIL_API_BASE}/users/me/drafts", access_token, json={"message": message}
+        )
+
+    async def send_message(self, access_token: str, raw_mime: str, thread_id: str | None = None) -> dict:
+        message: dict = {"raw": raw_mime}
+        if thread_id:
+            message["threadId"] = thread_id
+        return await self._request(
+            "POST", f"{GMAIL_API_BASE}/users/me/messages/send", access_token, json=message
+        )
+
+    async def update_sender_rule(self, access_token: str, rule_id: str, sender_email: str, target_label: str) -> dict:
+        """Gmail filters have no update verb: delete + recreate, returning the
+        NEW filter id (documented contract behavior)."""
+        await self.delete_sender_rule(access_token, rule_id)
+        created = await self.create_sender_rule(access_token, sender_email, target_label)
+        return {"old_rule_id": rule_id, "rule_id": created.get("id"), "updated": True}
+
+    # ------------------------------------------------------------------
     # Phase 4 — provider-backed enforcement
     # ------------------------------------------------------------------
 
-    QUARANTINE_LABEL_NAME = "CYBERGUARD-Quarantine"
+    QUARANTINE_LABEL_NAME = "CYBERGUARD-Quarantine"  # legacy alias of quarantine_label_name
 
     async def ensure_quarantine_label(self, access_token: str) -> str:
         """Find or create the CYBERGUARD-Quarantine label; return its id."""
@@ -273,22 +353,39 @@ class GmailProvider:
         )
         return str(created["id"])
 
-    async def quarantine_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict:
-        """Archive the message out of INBOX into the quarantine label."""
+    async def modify_message(
+        self, access_token: str, message_id: str,
+        add_label_ids: list[str] | None = None, remove_label_ids: list[str] | None = None,
+    ) -> dict:
+        """Add/remove labels on a message."""
+        body: dict = {}
+        if add_label_ids:
+            body["addLabelIds"] = add_label_ids
+        if remove_label_ids:
+            body["removeLabelIds"] = remove_label_ids
         return await self._request(
             "POST",
             f"{GMAIL_API_BASE}/users/me/messages/{message_id}/modify",
             access_token,
-            json={"addLabelIds": [quarantine_label], "removeLabelIds": ["INBOX"]},
+            json=body,
+        )
+
+    async def quarantine_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict:
+        """Archive the message out of INBOX into the quarantine label."""
+        return await self.modify_message(
+            access_token, message_id, add_label_ids=[quarantine_label], remove_label_ids=["INBOX"]
         )
 
     async def release_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict:
         """Return a quarantined message to the inbox."""
+        return await self.modify_message(
+            access_token, message_id, add_label_ids=["INBOX"], remove_label_ids=[quarantine_label]
+        )
+
+    async def move_to_trash(self, access_token: str, message_id: str) -> dict:
+        """Move a message to Gmail trash."""
         return await self._request(
-            "POST",
-            f"{GMAIL_API_BASE}/users/me/messages/{message_id}/modify",
-            access_token,
-            json={"addLabelIds": ["INBOX"], "removeLabelIds": [quarantine_label]},
+            "POST", f"{GMAIL_API_BASE}/users/me/messages/{message_id}/trash", access_token
         )
 
     async def delete_message(self, access_token: str, message_id: str, permanent: bool) -> dict:
@@ -296,9 +393,7 @@ class GmailProvider:
         if permanent:
             await self._request("DELETE", f"{GMAIL_API_BASE}/users/me/messages/{message_id}", access_token)
             return {"deleted": True, "permanent": True}
-        return await self._request(
-            "POST", f"{GMAIL_API_BASE}/users/me/messages/{message_id}/trash", access_token
-        )
+        return await self.move_to_trash(access_token, message_id)
 
     async def create_sender_rule(self, access_token: str, sender_email: str, target_label: str) -> dict:
         """Create a Gmail filter auto-quarantining future mail from the sender.

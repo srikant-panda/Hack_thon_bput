@@ -41,6 +41,9 @@ class User(Base):
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
     account_type: Mapped[str] = mapped_column(String(16), default="user")  # 'user' | 'organization' (frozen)
+    # Notification address (Phase 7) — strictly separate from any connected
+    # mailbox; system notifications NEVER go to connected mailboxes.
+    notification_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_single_user: Mapped[bool] = mapped_column(Boolean, default=True)
     active_organization_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
@@ -545,6 +548,32 @@ class SecurityEvent(Base):
     blocked_sender_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("blocked_senders.id", ondelete="SET NULL"), nullable=True,
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+
+
+class NotificationLog(Base):
+    """Delivery log for event email notifications (Phase 7).
+
+    Recipient is ALWAYS the user's notification_email — never a connected
+    mailbox. The default backend is DB-logged delivery (hackathon-demo safe);
+    optional SMTP is best-effort with fallback to DB logging.
+    """
+
+    __tablename__ = "notification_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    recipient_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    body_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # sent | failed
+    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # db_log | smtp — how the message was actually delivered
+    backend: Mapped[str] = mapped_column(String(16), default="db_log")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
 

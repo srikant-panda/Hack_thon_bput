@@ -43,6 +43,7 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
   { to: '/quarantine', label: 'Quarantine Queue', icon: PackageOpen },
   { to: '/blocked-senders', label: 'Blocked Senders', icon: Ban },
   { to: '/security-history', label: 'Security History', icon: ScrollText },
+  { to: '/notification-log', label: 'Notification Log', icon: Bell },
   { to: '/organization', label: 'Organization & Team', icon: Building2 },
   { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText },
   { to: '/reports', label: 'Reports', icon: FileBarChart },

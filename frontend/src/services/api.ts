@@ -30,7 +30,8 @@ import type {
   QuarantinedItem,
   BlockedSender,
   SecurityEventRecord,
-  QuarantineReview,} from '../types';
+  QuarantineReview,
+  NotificationLogEntry,} from '../types';
 import * as mockApi from './mockApi';
 import { db, addAuditLog } from './mockData';
 import { ApiError, apiFetch } from './http';
@@ -775,6 +776,23 @@ export async function keepQuarantined(itemId: string): Promise<string> {
   if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   const res = await apiFetch(`/enforcement/quarantine/${itemId}/keep`, { method: 'POST' });
   return res.status as string;
+}
+
+// --- Notifications (Phase 7) ---
+
+export async function listNotificationLogs(): Promise<NotificationLogEntry[]> {
+  if (USE_MOCK) return [];
+  const res = await apiFetch('/notifications');
+  return res.items as NotificationLogEntry[];
+}
+
+export async function updateNotificationEmail(email: string | null): Promise<string | null> {
+  if (USE_MOCK) return email;
+  const res = await apiFetch('/auth/notification-email', {
+    method: 'PUT',
+    body: JSON.stringify({ notification_email: email }),
+  });
+  return res.notification_email as string | null;
 }
 
 export function isMockMode(): boolean {

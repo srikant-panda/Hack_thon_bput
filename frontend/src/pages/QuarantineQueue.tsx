@@ -14,6 +14,7 @@ import {
 import PageHeader from '../components/common/PageHeader';
 import VerboseResultPanel, { SEVERITY_STYLES } from '../components/common/VerboseResultPanel';
 import * as api from '../services/api';
+import { useAuthStore } from '../store/authStore';
 import type { QuarantineReview, QuarantinedItem } from '../types';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -95,7 +96,12 @@ export default function QuarantineQueue() {
     setNotice(null);
     try {
       await api.releaseQuarantined(item.id);
-      setNotice(`Released "${item.scan_result?.subject || item.provider_message_id}" back to the inbox.`);
+      const notificationEmail = useAuthStore.getState().notificationEmail;
+      setNotice(
+        notificationEmail
+          ? `Released "${item.scan_result?.subject || item.provider_message_id}". Action successful. Notification sent to ${notificationEmail}.`
+          : `Released "${item.scan_result?.subject || item.provider_message_id}" back to the inbox.`,
+      );
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Release failed');

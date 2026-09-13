@@ -52,6 +52,10 @@ class SigninRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class NotificationEmailUpdate(BaseModel):
+    notification_email: Optional[str] = Field(default=None, max_length=255)
+
+
 @router.get("/username-available")
 async def username_available(username: str) -> dict[str, Any]:
     """Check username availability (validated against the signup pattern)."""
@@ -214,6 +218,7 @@ async def read_current_user(
         "full_name": user.full_name,
         "username": user.username,
         "account_type": user.account_type,
+        "notification_email": user.notification_email,
         "org_enabled": get_settings().ORG_ENABLED,
         "is_single_user": tenant.is_single_user,
         "active_role": tenant.role,
@@ -227,6 +232,32 @@ async def read_current_user(
         },
         "personal_organization_id": personal_org_id,
         "organizations": orgs_list,
+    }
+
+
+@router.put("/notification-email")
+async def update_notification_email(
+    payload: NotificationEmailUpdate,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Register the address that receives system notifications.
+
+    Strictly separate from any connected mailbox: system notifications NEVER
+    go to connected mailboxes (privacy boundary)."""
+    from app.core.errors import ValidationError
+
+    email = (payload.notification_email or "").strip().lower() or None
+    if email and ("@" not in email or "." not in email.split("@")[-1]):
+        raise ValidationError("notification_email must be a valid email address")
+
+    user_query = await db.execute(select(User).where(User.id == user.id))
+    user_db = user_query.scalar_one()
+    user_db.notification_email = email
+    await db.commit()
+    return {
+        "notification_email": email,
+        "message": "Notification email updated." if email else "Notification email cleared.",
     }
 
 

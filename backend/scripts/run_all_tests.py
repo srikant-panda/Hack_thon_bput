@@ -411,6 +411,14 @@ async def run_tests():
 
     await run_security_history_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 16. Phase 6-7 — Provider-Neutral Contract + Event Email Notifications
+    # -----------------------------------------------------------------------
+    print("\n[Suite 16] Phase 6-7 — Contract Hardening & Notifications")
+    from test_phase_6_7 import run_phase_6_7_tests
+
+    await run_phase_6_7_tests(runner)
+
     return runner.report()
 
 

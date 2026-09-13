@@ -14,7 +14,7 @@ _GMAIL_CAPABILITY = ProviderCapability(
     quarantine=True,          # implemented as archive + "CyberGuard-Quarantine" label (Phase 4)
     trash=True,               # Gmail API: messages.trash
     permanent_delete=True,    # Gmail API: messages.delete (requires explicit consent; Phase 4)
-    sender_rules=False,       # Gmail filters API not in scope
+    sender_rules=True,        # Gmail filters API via gmail.settings.basic scope
     send_mail=True,           # gmail.modify grants send; not used until declared
 )
 

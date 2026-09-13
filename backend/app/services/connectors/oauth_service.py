@@ -208,7 +208,7 @@ async def handle_gmail_callback(code: str, state: str) -> EmailConnectorAccount:
 
         connector.status = ConnectorStatus.CONNECTED
         connector.scopes = scopes
-        connector.capabilities = gmail_provider.capabilities.to_dict()
+        connector.capabilities = gmail_provider.capabilities
         connector.access_token_enc = encrypt_secret(access_token)
         connector.refresh_token_enc = encrypt_secret(refresh_token)
         connector.access_token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)

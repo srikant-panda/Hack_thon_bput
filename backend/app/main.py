@@ -28,6 +28,7 @@ from app.api import (
     routes_settings,
     routes_events,
     routes_health,
+    routes_notifications,
     routes_incidents,
     routes_integrations,
     routes_organizations,
@@ -80,6 +81,7 @@ app.add_middleware(
 
 # Register API routers under /api/v1
 app.include_router(routes_health.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_notifications.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_organizations.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_db.router, prefix=settings.API_V1_PREFIX)

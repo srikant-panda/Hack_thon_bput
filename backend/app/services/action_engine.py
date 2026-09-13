@@ -25,7 +25,7 @@ from app.schemas.scan_results import ScanResult
 from app.services.security_history_service import record_event
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
 from app.services.email_providers.base import EmailProviderError
-from app.services.email_providers.gmail import gmail_provider
+from app.services.email_providers import get_provider
 
 logger = logging.getLogger("cyberguard.action_engine")
 
@@ -108,11 +108,24 @@ async def enforce_scan_result(
 
     sender = _sender_email(message.sender)
     try:
+        # Phase 6: resolve the provider through the neutral contract — the
+        # engine never touches Gmail-specific code.
+        provider = get_provider(connector.provider)
+        caps = provider.capabilities
+        if not caps.get("supports_quarantine"):
+            scan.provider_operation_status = "failed"
+            scan.provider_operation_detail = (
+                f"Provider '{connector.provider}' does not support quarantine."
+            )
+            await _log(db, connector, "enforcement", "unsupported",
+                       f"Provider {connector.provider} lacks quarantine support")
+            return scan
+
         token = await _get_token(db, connector)
-        label_id = await gmail_provider.ensure_quarantine_label(token)
+        label_id = await provider.ensure_quarantine_label(token)
 
         # 1. Quarantine the message itself.
-        await gmail_provider.quarantine_message(token, message.provider_message_id, label_id)
+        await provider.quarantine_message(token, message.provider_message_id, label_id)
 
         expires_at = (
             datetime.now(timezone.utc) + timedelta(hours=settings.quarantine_expiry_hours)
@@ -134,10 +147,11 @@ async def enforce_scan_result(
         await db.commit()
         await db.refresh(item)
 
-        # 2. Block the sender via a Gmail filter (once per sender).
+        # 2. Block the sender via a provider filter (once per sender) — only
+        # if the provider actually supports sender rules.
         rule_id: str | None = None
         rule_note = ""
-        if scan.overall_severity in ("critical", "high"):
+        if scan.overall_severity in ("critical", "high") and caps.get("supports_sender_rules"):
             existing = await db.execute(
                 select(BlockedSender).where(
                     BlockedSender.connector_id == connector.id,
@@ -146,7 +160,7 @@ async def enforce_scan_result(
                 )
             )
             if existing.scalar_one_or_none() is None:
-                rule = await gmail_provider.create_sender_rule(token, sender, label_id)
+                rule = await provider.create_sender_rule(token, sender, label_id)
                 rule_id = str(rule.get("id", ""))
                 block_row = BlockedSender(
                     owner_user_id=connector.owner_user_id,
@@ -166,7 +180,7 @@ async def enforce_scan_result(
 
         scan.provider_operation_status = "success"
         scan.provider_operation_detail = (
-            f"Message quarantined at Gmail (label '{gmail_provider.QUARANTINE_LABEL_NAME}', "
+            f"Message quarantined at the provider (label '{provider.quarantine_label_name}', "
             f"removed from INBOX)"
             + (f"; sender {sender} auto-blocked via filter" if rule_id else "")
             + (rule_note)
@@ -197,7 +211,7 @@ async def enforce_scan_result(
             action_requested=scan.recommended_action,
             action_performed="quarantine",
             operation_status="success",
-            operation_detail=f"Gmail label '{gmail_provider.QUARANTINE_LABEL_NAME}' applied, INBOX removed",
+            operation_detail=f"Label '{provider.quarantine_label_name}' applied, INBOX removed",
             quarantined_item_id=item.id,
         )
         if rule_id:
@@ -214,7 +228,7 @@ async def enforce_scan_result(
                 action_requested="block_sender",
                 action_performed="create_sender_rule",
                 operation_status="success",
-                operation_detail=f"Gmail filter {rule_id} auto-quarantines future mail from {sender}",
+                operation_detail=f"Filter {rule_id} auto-quarantines future mail from {sender}",
                 blocked_sender_id=block_id,
             )
         await _log(db, connector, "enforcement", "success",

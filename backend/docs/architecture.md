@@ -164,6 +164,36 @@ duplicate identities for the same verified email are impossible because the
 upsert keys on Supabase user id and email. Two Supabase keys remain strictly
 separated (anon = verification, service role = migrations/storage only).
 
+### Provider-neutral contract (finalized Phase 6)
+
+`EmailProvider` (`app/services/email_providers/base.py`) defines the exact
+14-method contract: `authorize`, `refresh_token`, `list_messages`,
+`get_message`, `get_attachment`, `create_draft`, `send_message`,
+`modify_message`, `move_to_trash`, `delete_message`, `quarantine_message`,
+`create_sender_rule`, `update_sender_rule`, `delete_sender_rule` (plus the
+operational `get_profile` / `test_connection` /
+`release_message` / `ensure_quarantine_label` extensions). A `capabilities`
+property exposes boolean `supports_*` flags so engines and the UI query what
+a provider actually supports instead of guessing. Two implementations exist:
+`GmailProvider` and an in-memory `MockEmailProvider` (configurable failure
+flags) — proving the enforcement engine and scheduler rely only on the
+contract. Providers are resolved through `get_provider(connector.provider)`;
+`action_engine.py` and `scheduler.py` contain zero Gmail-specific imports.
+
+### Event email notifications (Phase 7)
+
+High-severity security events (`quarantine`, `sender_block`, `release`,
+`delete`, `sender_expiry`, `sender_release`) trigger an alert email rendered
+from a standard template ("CYBERGUARD Alert: [Event] - [Sender]") and
+delivered to the user's registered `users.notification_email` — **never** to
+a connected mailbox. Delivery backends: `db_log` (default; the rendered email
+is persisted to `cyberguard.notification_logs` — deterministic, demo-safe)
+or optional best-effort SMTP (`NOTIFICATION_SMTP_HOST`; any failure falls
+back to DB logging with the real error recorded). The hook lives in
+`record_event`, is fail-safe, and users register/clear the address via
+`PUT /auth/notification-email`; the log is browsable on the Notification Log
+page (`/notification-log`).
+
 ### Email connectors (Phase 1-2)
 
 Gmail is the only live provider. It uses CYBERGUARD's **own Google OAuth
