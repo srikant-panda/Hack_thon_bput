@@ -1,0 +1,75 @@
+{
+  "description": "FP-hardening regression set (Deliverable 4): realistic marketing/transactional email that MUST NOT be auto-quarantined. Post-Deliverable-2 policy these messages must (a) score at most 'medium' overall and (b) fail the corroboration gate (no provider write). Includes the exact Medium digest payload that caused the live quarantine loop and a mediumday.com event-registration token URL on a brand-secondary domain.",
+  "samples": [
+    {
+      "name": "medium_digest_email_link",
+      "sender": "Medium Daily Digest <noreply@medium.com>",
+      "subject": "Python stories you might like",
+      "body": "Hi reader,\n\nHere are today's Python stories selected for you.\n\nRead more: https://medium.com/@coder6861python?source=email-971ea2707eee-1789158672039-digest.reader\n\nYou are receiving this email because you follow Python topics.\nUnsubscribe: https://medium.com/me/settings/email",
+      "source": "live inbox FP loop (quarantine/release cycle, 11 events)"
+    },
+    {
+      "name": "medium_event_registration_token",
+      "sender": "Medium Events <events@mediumday.com>",
+      "subject": "Your registration is confirmed for Medium Day",
+      "body": "You're in! Your event registration token is below.\n\nhttps://mediumday.com/?eventRegSource=Kk9Xq2vT7wYzR4bN1mJcP6dFs3hLa0eGu8iQo5VyBn2tAxW9eCr4UlZp7Sd0Hj3gMf6Ti1qWeRtYyUuIoPpAsDfGhJ8kLzXcVbNmQwe4rTyUiOpAsdFgHjKlZxCvBnM1234567890\n\nAdd to calendar and we'll see you there. Manage your notification settings at https://mediumday.com/settings",
+      "source": "remaining url_detector FP (non-top-1m brand-secondary domain, 104-char token)"
+    },
+    {
+      "name": "substack_newsletter",
+      "sender": "The Pragmatic Engineer <ness@substack.com>",
+      "subject": "Weekly issue: inside a platform rewrite",
+      "body": "This week: a deep dive into a multi-year platform rewrite, what went well and what didn't.\n\nRead online: https://newsletter.example-publisher.com/p/platform-rewrite-retrospective\n\nYou can manage your subscription at any time.",
+      "source": "typical paid newsletter"
+    },
+    {
+      "name": "mailchimp_marketing_blast",
+      "sender": "Indie Hacker Weekly <hello@mail.indiehacker-weekly.com>",
+      "subject": "Our biggest sale: 40% off annual plans!",
+      "body": "Exclusive offer for subscribers: 40% off annual plans this week only.\n\nClaim your discount: https://mail.indiehacker-weekly.com/c/abc123?utm_source=newsletter&utm_medium=email&utm_campaign=spring_sale\n\nUnsubscribe anytime.",
+      "source": "marketing vocabulary: exclusive/claim/subscription + tracking params"
+    },
+    {
+      "name": "github_watch_digest",
+      "sender": "GitHub <noreply@github.com>",
+      "subject": "[github/labelkit] Weekly digest: 3 new releases",
+      "body": "3 new releases in repositories you watch.\n\nhttps://github.com/github/labelkit/releases/tag/v2.4.0\n\nYou're receiving this because you watch this repository. Manage preferences: https://github.com/settings/notifications",
+      "source": "transactional digest from top-1m domain"
+    },
+    {
+      "name": "linkedin_job_digest",
+      "sender": "LinkedIn <jobs-noreply@linkedin.com>",
+      "subject": "5 new jobs match your Python skills",
+      "body": "Here are new jobs based on your profile.\n\nhttps://www.linkedin.com/jobs/view/3987456123/?ref=email-digest&trackingId=9xYz1234aBcD\n\nThis email was intended for a subscriber. Unsubscribe: https://www.linkedin.com/email-action/unsubscribe",
+      "source": "job digest with ref/tracking params"
+    },
+    {
+      "name": "aws_billing_receipt",
+      "sender": "AWS <no-reply-aws@amazon.com>",
+      "subject": "Your AWS invoice is available",
+      "body": "Your invoice for August is available in the Billing console.\n\nPayment of $42.17 was charged to your card ending 4242.\n\nhttps://console.aws.amazon.com/billing/home#/bills",
+      "source": "transactional receipt (legitimate financial vocabulary)"
+    },
+    {
+      "name": "notion_workspace_invite",
+      "sender": "Notion <team@makenotion.com>",
+      "subject": "Alex invited you to workspaces",
+      "body": "Alex invited you to join the 'Product Docs' workspace on Notion.\n\nAccept invitation: https://www.notion.so/invite/0f8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d\n\nNotion is where teams organize work.",
+      "source": "product invitation with opaque token path"
+    },
+    {
+      "name": "courier_out_for_delivery",
+      "sender": "DHL Express <noreply@dhl.com>",
+      "subject": "Shipment 7712345678 is out for delivery",
+      "body": "Your shipment is out for delivery and will arrive today between 13:00 and 15:00.\n\nTrack: https://www.dhl.com/en/express/tracking.html?AWB=7712345678&fx=1\n\nNo action is required from you.",
+      "source": "transactional notification with tracking params"
+    },
+    {
+      "name": "eventbrite_ticket_confirmation",
+      "sender": "Eventbrite <noreply@eventbrite.com>",
+      "subject": "Order confirmed: DevOps Meetup 2026",
+      "body": "Your order is confirmed. Tickets and event details:\n\nhttps://www.eventbrite.com/myorder?ticket=reg_token_9a8b7c6d5e4f&event=412002\n\nWe look forward to seeing you!",
+      "source": "registration token on legitimate domain"
+    }
+  ]
+}

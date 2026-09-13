@@ -31,7 +31,9 @@ import type {
   BlockedSender,
   SecurityEventRecord,
   QuarantineReview,
-  NotificationLogEntry,} from '../types';
+  NotificationLogEntry,
+  TrustedSender,
+  ReleaseAndTrustResult,} from '../types';
 import * as mockApi from './mockApi';
 import { db, addAuditLog } from './mockData';
 import { ApiError, apiFetch } from './http';
@@ -734,6 +736,33 @@ export async function listBlockedSenders(): Promise<BlockedSender[]> {
 export async function unblockSender(blockId: string): Promise<string> {
   if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   const res = await apiFetch(`/enforcement/blocked-senders/${blockId}/release`, { method: 'POST' });
+  return res.status as string;
+}
+
+export async function releaseAndTrustQuarantined(itemId: string): Promise<ReleaseAndTrustResult> {
+  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
+  return (await apiFetch(`/enforcement/quarantine/${itemId}/release-and-trust`, {
+    method: 'POST',
+  })) as ReleaseAndTrustResult;
+}
+
+export async function listTrustedSenders(): Promise<TrustedSender[]> {
+  if (USE_MOCK) return [];
+  const res = await apiFetch('/enforcement/trusted-senders');
+  return res.items as TrustedSender[];
+}
+
+export async function trustSender(senderEmail: string, reason: string): Promise<TrustedSender> {
+  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
+  return (await apiFetch('/enforcement/trusted-senders', {
+    method: 'POST',
+    body: JSON.stringify({ sender_email: senderEmail, reason }),
+  })) as TrustedSender;
+}
+
+export async function removeTrustedSender(senderId: string): Promise<string> {
+  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
+  const res = await apiFetch(`/enforcement/trusted-senders/${senderId}`, { method: 'DELETE' });
   return res.status as string;
 }
 

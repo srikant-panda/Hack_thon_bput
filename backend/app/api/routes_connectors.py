@@ -39,6 +39,7 @@ from app.services.email_providers.base import EmailProviderError
 from app.services.email_providers.gmail import gmail_provider
 from app.services.email_providers.registry import get_registry
 from app.services.mail_scanner import scan_message
+from app.services.trusted_senders import annotate_scan_with_trust, is_sender_trusted
 from app.services.security_history_service import record_event
 
 logger = logging.getLogger("cyberguard.connectors.api")
@@ -272,6 +273,11 @@ async def scan_connector_messages(
         for message_id in message_ids:
             message = await gmail_provider.get_message(access_token, message_id)
             scan = await scan_message(message)
+            # Trust list (FP-hardening D1): annotate trusted senders in the
+            # scan itself — verdict still shown, enforcement becomes
+            # recommend-only in the action engine.
+            if await is_sender_trusted(db, user.id, message.sender):
+                scan = annotate_scan_with_trust(scan)
             pairs.append((message, scan))
             # Security history: one scan_verdict per analyzed message (Phase 5).
             await record_event(

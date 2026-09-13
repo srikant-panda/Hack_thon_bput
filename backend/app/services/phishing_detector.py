@@ -48,6 +48,20 @@ def _brand_pattern(brand: str) -> re.Pattern:
 
 URGENCY_KEYWORDS = ("urgent", "immediately", "suspend", "verify")
 
+# Email-channel vocabulary (FP-hardening, Deliverable 3). Marketing mail
+# legitimately says "free/exclusive/winner" — that vocabulary belongs to the
+# SMS spam list below and NEVER fires on the email channel. Email-channel
+# evidence is credential/financial language instead (combined with the
+# credential-request phrase patterns above):
+#   verify / suspend / urgent  -> _check_urgency
+#   credential requests        -> _check_credential_requests
+#   payment / wire transfer    -> _check_financial_vocabulary (medium weight,
+#                                 receipts and invoices legitimately mention
+#                                 payment — evidence, not verdict)
+EMAIL_PHISH_KEYWORDS = ("verify", "suspend", "urgent", "credential", "payment", "wire transfer")
+
+FINANCIAL_VOCABULARY = ("payment", "wire transfer")
+
 CREDENTIAL_REQUEST_PHRASES = (
     "verify password",
     "confirm account",
@@ -73,18 +87,23 @@ URL_IN_BODY_PATTERN = re.compile(r"https?://[^\s\"'<>\)]+", re.IGNORECASE)
 IP_HOST_PATTERN = re.compile(r"^https?://\d{1,3}(?:\.\d{1,3}){3}(?:[/:]|$)", re.IGNORECASE)
 
 # --- SMS / message-specific heuristics (Part 8 tuning) ---
-# The evaluator runs SMS text through the same body-based analysis, so these
-# patterns capture SMS spam vocabulary that email heuristics alone miss.
+# Channel-aware (FP-hardening, Deliverable 3): these patterns capture SMS spam
+# vocabulary that email heuristics alone miss, and apply ONLY when
+# channel == "sms". Newsletters always say "free/exclusive/immediately" and
+# carry marketing shortcodes — scoring them as phishing on the email channel
+# was the phishing-engine false-positive source (60/100 on Medium digests).
 # 5-6 digit shortcodes ("Txt WIN to 87121") and international/long phone numbers.
 SMS_SHORTCODE_PATTERN = re.compile(r"\b\d{5,6}\b")
 SMS_PHONE_PATTERN = re.compile(r"(?:\+\d{6,}\b|\b0\d{9,10}\b)")
 # SMS spam vocabulary (spec keywords plus common UCI-SMS-style spam words).
-SMS_KEYWORD_PATTERN = re.compile(
+SMS_SPAM_KEYWORDS_PATTERN = re.compile(
     r"\b(txt|reply\s+stop|winner|won|win|claim|loan|cash|urgent\s+call|free|prize|"
     r"reward|congrat\w*|selected|subscription|ringtone|charged|voucher|guaranteed|"
     r"exclusive|nokia)\b",
     re.IGNORECASE,
 )
+# Back-compat alias (older call sites / tests reference the pattern by name).
+SMS_KEYWORD_PATTERN = SMS_SPAM_KEYWORDS_PATTERN
 # Share of digits among alphanumeric characters above which a short message
 # looks like machine-generated spam (shortcodes, amounts, premium numbers).
 SMS_DIGIT_RATIO_THRESHOLD = 0.15
@@ -177,6 +196,29 @@ def _check_threat_language(text: str) -> list[dict]:
     ]
 
 
+def _check_financial_vocabulary(text: str) -> list[dict]:
+    """Email-channel financial vocabulary (FP-hardening, Deliverable 3).
+
+    Deliberately MEDIUM weight: legitimate receipts, invoices and billing
+    notifications mention payment — this is corroborating evidence, not a
+    verdict on its own.
+    """
+    lowered = text.lower()
+    return [
+        {
+            "type": "financial_vocabulary",
+            "value": phrase,
+            "severity": "medium",
+            "description": (
+                f"Financial keyword '{phrase}' found; phishing campaigns seek "
+                "payments, but legitimate receipts use the same vocabulary."
+            ),
+        }
+        for phrase in FINANCIAL_VOCABULARY
+        if phrase in lowered
+    ]
+
+
 def _check_body_urls(body: str) -> list[dict]:
     indicators: list[dict] = []
     seen_hosts: set[str] = set()
@@ -210,14 +252,32 @@ def _check_body_urls(body: str) -> list[dict]:
         if host and host not in seen_hosts:
             seen_hosts.add(host)
             if url.lower().startswith("http://"):
-                indicators.append(
-                    {
-                        "type": "insecure_link",
-                        "value": url,
-                        "severity": "high",
-                        "description": "Link in the email body uses plain HTTP instead of HTTPS.",
-                    }
-                )
+                # FP-hardening (Deliverable 3): an HTTP link to a top-1M
+                # whitelisted domain is a hygiene note, not phishing evidence.
+                from app.core.url_reputation import is_domain_in_top1m
+
+                if is_domain_in_top1m(host):
+                    indicators.append(
+                        {
+                            "type": "insecure_link_hygiene",
+                            "value": url,
+                            "severity": "low",
+                            "description": (
+                                "Hygiene note: HTTP link to well-known domain "
+                                f"'{host}' (top-1M whitelist) — not phishing "
+                                "evidence by itself."
+                            ),
+                        }
+                    )
+                else:
+                    indicators.append(
+                        {
+                            "type": "insecure_link",
+                            "value": url,
+                            "severity": "high",
+                            "description": "Link in the email body uses plain HTTP instead of HTTPS.",
+                        }
+                    )
     return indicators
 
 
@@ -255,7 +315,7 @@ def _check_sms_patterns(text: str) -> list[dict]:
             }
         )
 
-    for keyword in sorted(set(SMS_KEYWORD_PATTERN.findall(text))):
+    for keyword in sorted(set(SMS_SPAM_KEYWORDS_PATTERN.findall(text))):
         indicators.append(
             {
                 "type": "sms_spam_keyword",
@@ -301,9 +361,17 @@ def _check_sms_patterns(text: str) -> list[dict]:
     return indicators
 
 
-def analyze_email_heuristics(sender: str, subject: str, body: str) -> list[dict]:
-    """Run all phishing heuristics and return the indicator list.
+def analyze_email_heuristics(
+    sender: str, subject: str, body: str, channel: str = "email"
+) -> list[dict]:
+    """Run phishing heuristics for one message and return the indicator list.
 
+    Channel-aware (FP-hardening, Deliverable 3): ``channel="email"`` (default)
+    uses EMAIL_PHISH_KEYWORDS evidence — urgency, credential requests, threat
+    language, financial vocabulary, sender lookalikes, URL forensics — while
+    SMS spam vocabulary (shortcodes, "free/winner/exclusive", digit-ratio,
+    ALL-CAPS runs) applies ONLY to ``channel="sms"``. Running the SMS list on
+    marketing email was a false-positive source (60/100 on Medium digests).
     Hybrid mode (ML Step 3): after the heuristic indicators, the trained
     email model scores the combined sender/subject/body; when available the
     ml_model indicator is appended and callers obtain the blended score via
@@ -318,7 +386,13 @@ def analyze_email_heuristics(sender: str, subject: str, body: str) -> list[dict]
     indicators.extend(_check_threat_language(subject))
     indicators.extend(_check_threat_language(body))
     indicators.extend(_check_body_urls(body))
-    indicators.extend(_check_sms_patterns(body))
+    if channel == "sms":
+        indicators.extend(_check_sms_patterns(body))
+    else:
+        # EMAIL_PHISH_KEYWORDS financial evidence (medium weight — receipts
+        # legitimately mention payment; see constant comment).
+        indicators.extend(_check_financial_vocabulary(subject))
+        indicators.extend(_check_financial_vocabulary(body))
 
     probability = predict_email("\n".join([sender, subject, body]))
     if probability is not None:

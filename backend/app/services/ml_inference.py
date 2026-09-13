@@ -121,6 +121,12 @@ def email_model_artifact() -> str:
     return "email_phishing_xgb_v2.pkl" if email_model_version() == "v2" else "email_phishing_xgb.pkl"
 
 
+URL_V3_ARTIFACTS = {
+    "v3.1": "url_xgb_v3.1.pkl",
+    "v3": "url_xgb_v3.pkl",
+}
+
+
 def url_model_version() -> str:
     """Read active URL model version from models_dir()/calibration.json or calibration config."""
     try:
@@ -129,13 +135,13 @@ def url_model_version() -> str:
         with (models_dir() / "calibration.json").open(encoding="utf-8") as fh:
             calibration = json.load(fh)
         version = str(calibration.get("url_model_version", "v2"))
-        return version if version in ("v1", "v2", "v3") else "v2"
+        return version if version in ("v1", "v2") or version.startswith("v3") else "v2"
     except Exception:
         try:
             from app.core.calibration import get_calibration
 
             version = str(get_calibration().get("url_model_version", "v2"))
-            return version if version in ("v1", "v2", "v3") else "v2"
+            return version if version in ("v1", "v2") or version.startswith("v3") else "v2"
         except Exception:
             return "v2"
 
@@ -145,21 +151,22 @@ def url_model_artifact() -> str:
     bundle = get_url_model()
     if bundle is not None:
         return bundle[1]
-    return {
-        "v3": "url_xgb_v3.pkl",
-        "v2": "url_xgb_v2.pkl",
-    }.get(url_model_version(), "url_xgb.pkl")
+    version = url_model_version()
+    if version in URL_V3_ARTIFACTS:
+        return URL_V3_ARTIFACTS[version]
+    return "url_xgb_v2.pkl" if version == "v2" else "url_xgb.pkl"
 
 
 def _load_url_model():
     base = models_dir()
-    if url_model_version() == "v3":
+    version = url_model_version()
+    if version in URL_V3_ARTIFACTS:
         try:
-            model = joblib.load(base / "url_xgb_v3.pkl")
-            return model, "url_xgb_v3.pkl"
+            model = joblib.load(base / URL_V3_ARTIFACTS[version])
+            return model, URL_V3_ARTIFACTS[version]
         except Exception as exc:
-            logger.warning("url model v3 unavailable — falling back to v2: %s", exc)
-    if url_model_version() in ("v2", "v3"):
+            logger.warning("url model %s unavailable — falling back to v2: %s", version, exc)
+    if version in URL_V3_ARTIFACTS or version == "v2":
         try:
             model = joblib.load(base / "url_xgb_v2.pkl")
             return model, "url_xgb_v2.pkl"

@@ -58,8 +58,35 @@ PHISH_FEED_CACHE = CACHE_DIR / "phishing_feed_active.txt"
 SEED = 42
 N_BENIGN = 50_000
 N_BENIGN_TRACKING_AUG = 10_000
+# v3.1 augmentation (FP-hardening D4): benign "single high-entropy token
+# query on a brand-secondary domain" — event-registration / ticket links
+# (mediumday.com/?eventRegSource=<104-char token>) share the structural
+# signature of victim-session phishing links; explicit benign examples teach
+# the difference without weakening real detection.
+N_BENIGN_BRAND_SECONDARY = 9_000
 N_PHISH_REAL = 50_000
 N_PHISH_SYNTHETIC_FALLBACK = 20_000
+
+BRAND_STEMS = ["medium", "google", "apple", "amazon", "netflix", "spotify",
+               "notion", "figma", "slack", "zoom", "atlassian", "dropbox"]
+BRAND_SECONDARY_SUFFIXES = ["day", "weekly", "hub", "labs", "notes", "journal",
+                            "times", "digest", "events", "live"]
+BRAND_SECONDARY_TLDS = ["com", "org", "io", "co"]
+TOKEN_QUERY_PARAMS = ["eventRegSource", "ticket", "reg_token", "confirm",
+                      "attendee", "session", "sig", "ref_id", "registration"]
+
+# Single-word deep paths real event/community product sites use — must cover
+# the settings/help/tickets paths these emails actually link to.
+BRAND_SECONDARY_PATHS = [
+    "", "", "/", "/", "/settings", "/events", "/about", "/help", "/privacy",
+    "/terms", "/support", "/blog", "/faq", "/schedule", "/speakers", "/venue",
+    "/tickets", "/register", "/pricing", "/contact", "/email-preferences",
+]
+
+# Brand stems that must never be used as benign lookalike bait on their own
+# official-domain-shaped hosts (paypal/medium etc. stay out of the generator
+# output when the composed domain collides with a real top-1M entry — filtered
+# at generation time).
 
 PLATFORM_HOSTS = (
     "vercel.app", "netlify.app", "godaddysites.com", "blogspot.com", "weebly.com",
@@ -177,6 +204,48 @@ def build_benign_urls(rng: random.Random, top1m: set) -> list[str]:
     return urls
 
 
+def build_brand_secondary_urls(rng: random.Random, top1m: set) -> list[str]:
+    """v3.1 augmentation: benign token-query links on brand-secondary domains.
+
+    Composes {brand}{suffix}.{tld} hosts that (a) are NOT in the top-1M list
+    (exactly like mediumday.com) and (b) carry one long high-entropy token
+    query parameter — teaching the model that domain reputation is about the
+    registrable domain itself, not the tracking blob behind it.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+    while len(urls) < N_BENIGN_BRAND_SECONDARY:
+        domain = (
+            rng.choice(BRAND_STEMS)
+            + rng.choice(BRAND_SECONDARY_SUFFIXES)
+            + rng.choice(["", str(rng.randint(2, 99))])
+            + "."
+            + rng.choice(BRAND_SECONDARY_TLDS)
+        )
+        if domain in top1m or domain in seen:
+            continue
+        seen.add(domain)
+        scheme = "https"
+        style = rng.random()
+        if style < 0.5:
+            # The hard case: one long high-entropy token query parameter.
+            param = rng.choice(TOKEN_QUERY_PARAMS)
+            token = _alnum(rng, rng.randint(40, 120)) + str(rng.randint(10 ** 6, 10 ** 12))
+            urls.append(f"{scheme}://{domain}/?{param}={token}")
+        elif style < 0.7:
+            # Bare/root and single-word deep paths — the domain itself must
+            # read benign wherever it is linked (/settings, /tickets, ...).
+            path = rng.choice(BRAND_SECONDARY_PATHS)
+            urls.append(f"{scheme}://{domain}{path}")
+        else:
+            # Realistic multi-segment deep paths.
+            path = rng.choice(BENIGN_PATHS) or "/about"
+            path = _expand_path(rng, path)
+            urls.append(f"{scheme}://{domain}{path}")
+    print(f"  benign (v3.1 brand-secondary token augmentation): {len(urls):,} URLs")
+    return urls
+
+
 def fetch_real_phishing_urls(rng: random.Random) -> tuple[list[str], str]:
     """Download (or reuse cached) the real phishing feed; sample N_PHISH_REAL."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -269,11 +338,17 @@ TEST_URLS = [
     ("http://192.168.1.5/verify-login.php", 1),
 ]
 
+# v3.1 gate: the live FP that motivated the brand-secondary augmentation.
+V31_TEST_URLS = [
+    ("https://mediumday.com/?eventRegSource=Kk9Xq2vT7wYzR4bN1mJcP6dFs3hLa0eGu8iQo5VyBn2tAxW9eCr4UlZp7Sd0Hj3gMf6Ti1qWeRtYyUuIoPpAsDfGhJ8kLzXcVbNmQwe4rTyUiOpAsdFgHjKlZxCvBnM1234567890", 0),
+]
 
-def run_validation(model: XGBClassifier, top1m: set) -> bool:
+
+def run_validation(model: XGBClassifier, top1m: set, version: str = "v3") -> bool:
     print("\n--- V3 MODEL VALIDATION ---")
+    test_urls = list(TEST_URLS) + (V31_TEST_URLS if version.startswith("v3.1") else [])
     all_pass = True
-    for url, expected in TEST_URLS:
+    for url, expected in test_urls:
         features = extract_url_features_v3(url, top1m)
         proba = model.predict_proba(pd.DataFrame([vectorize_v3(features)], columns=FEATURE_COLUMNS_V3))[0][1]
         is_phish_pred = proba > 0.5
@@ -296,11 +371,16 @@ def run_validation(model: XGBClassifier, top1m: set) -> bool:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    print("=== url_xgb_v3 training (real datasets, reputation-aware features) ===")
+    version = sys.argv[1] if len(sys.argv) > 1 else "v3"
+    model_filename = "url_xgb_v3.pkl" if version == "v3" else f"url_xgb_{version}.pkl"
+    model_path = MODELS_DIR / model_filename
+    print(f"=== {model_filename} training (real datasets, reputation-aware features) ===")
     rng = random.Random(SEED)
     top1m = load_top1m_domains()
 
     benign_urls = build_benign_urls(rng, top1m)
+    if version.startswith("v3.1"):
+        benign_urls += build_brand_secondary_urls(rng, top1m)
     phish_urls, data_mode = fetch_real_phishing_urls(rng)
 
     # Dedup by URL (feature-level dedup would collapse distinct short domains
@@ -346,10 +426,10 @@ def main() -> int:
     print(f"  accuracy: {acc:.4f}")
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, MODEL_PATH)  # joblib for parity with the runtime joblib.load path
-    print(f"\n  saved: {MODEL_PATH}")
+    joblib.dump(model, model_path)  # joblib for parity with the runtime joblib.load path
+    print(f"\n  saved: {model_path}")
 
-    ok = run_validation(model, top1m)
+    ok = run_validation(model, top1m, version=version)
 
     # Platform-hosted phishing spot check (must NOT be whitelisted by reputation).
     platform_phish = [u for u in phish_urls if any(p in u for p in PLATFORM_HOSTS)][:5]
@@ -362,7 +442,7 @@ def main() -> int:
             print(f"  {'✅' if p > 0.5 else '❌'} Prob: {p:.4f} | {u[:100]}")
 
     metrics = {
-        "model": "url_xgb_v3",
+        "model": model_filename,
         "data_mode": data_mode,
         "n_rows": int(len(frame)),
         "n_benign": n_benign,
@@ -371,7 +451,7 @@ def main() -> int:
         "test_f1": round(float(f1), 4),
         "test_accuracy": round(float(acc), 4),
     }
-    (MODELS_DIR / "url_v3_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    (MODELS_DIR / f"url_{version.replace('.', '')}_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print("\n=== DONE ===")
     return 0 if ok else 1
 

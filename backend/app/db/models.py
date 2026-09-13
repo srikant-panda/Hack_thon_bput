@@ -522,7 +522,8 @@ class SecurityEvent(Base):
     )
     # scan_verdict | quarantine | release | keep | delete | sender_block |
     # sender_release | sender_expiry | connector_connect |
-    # connector_disconnect | connector_test
+    # connector_disconnect | connector_test | enforcement_decision |
+    # sender_trust | sender_untrust
     event_type: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
     connector_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("email_connector_accounts.id", ondelete="SET NULL"), nullable=True,
@@ -636,3 +637,29 @@ class ActionExecution(Base):
     alert: Mapped[Optional["Alert"]] = relationship("Alert", back_populates="action_executions")
     event: Mapped[Optional["Event"]] = relationship("Event")
     policy: Mapped[Optional["EnforcementPolicy"]] = relationship("EnforcementPolicy")
+
+
+class TrustedSender(Base):
+    """Sender trust list (FP-hardening, Deliverable 1).
+
+    Populated explicitly by the user via "Release & trust sender" on a
+    quarantined message (or from the Blocked Senders page). Trusted senders
+    never auto-enforce: scans still run and verdicts are still shown, but the
+    action engine becomes recommend-only for their messages with an explicit
+    "sender is in your trust list" annotation.
+    """
+
+    __tablename__ = "trusted_senders"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "sender_email", name="uq_trusted_sender_owner_email"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    sender_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    sender_domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Why the trust entry exists, e.g. "released: <subject>" — shown in the UI.
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)

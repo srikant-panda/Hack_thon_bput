@@ -22,6 +22,7 @@ from app.schemas.scan_results import (
     ScanResult,
 )
 from app.services.impersonation_detector import analyze_impersonation_heuristics
+from app.services.ml_inference import blend_scores, split_ml_indicator
 from app.services.phishing_detector import analyze_email_heuristics
 from app.services.scoring_service import SEVERITY_WEIGHTS, calculate_score, get_severity
 from app.services.url_detector import analyze_url_heuristics
@@ -52,8 +53,19 @@ def _map_indicators(indicators: Iterable[dict]) -> list[Indicator]:
     ]
 
 
+def _engine_score(indicators: list[dict]) -> int:
+    """Engine verdict score: heuristic weight-sum blended with the engine's
+    ML probability via the monotonic blend (identical to the shipped
+    routes_analysis path: ML may raise, never lower the heuristic verdict)."""
+    heuristic_indicators, ml_probability = split_ml_indicator(indicators)
+    heuristic_score = calculate_score(heuristic_indicators)
+    if ml_probability is not None:
+        return blend_scores(heuristic_score, ml_probability)
+    return heuristic_score
+
+
 def _feature_analysis(engine: str, indicators: list[dict], explanation: str) -> tuple[FeatureAnalysis, list[dict]]:
-    score = calculate_score(indicators)
+    score = _engine_score(indicators)
     return (
         FeatureAnalysis(
             engine=engine,

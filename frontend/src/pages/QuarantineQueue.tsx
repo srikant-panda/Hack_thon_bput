@@ -7,6 +7,7 @@ import {
   Inbox,
   Loader2,
   RefreshCw,
+  ShieldCheck,
   ShieldOff,
   Trash2,
   X,
@@ -110,6 +111,33 @@ export default function QuarantineQueue() {
     }
   };
 
+  // Two-action honesty (D1): "Release & trust" never silently removes an
+  // active Gmail filter. When the response reports an existing block, the UI
+  // offers "Also unblock sender" as an explicit second step.
+  const [pendingUnblock, setPendingUnblock] = useState<{ blockId: string; senderEmail: string } | null>(null);
+
+  const handleReleaseAndTrust = async (item: QuarantinedItem) => {
+    setActionId(item.id);
+    setError(null);
+    setNotice(null);
+    setPendingUnblock(null);
+    try {
+      const res = await api.releaseAndTrustQuarantined(item.id);
+      setNotice(
+        res.message ??
+          `Released "${item.scan_result?.subject || item.provider_message_id}" and added ${item.sender_email} to your trust list.`,
+      );
+      if (res.existing_block) {
+        setPendingUnblock({ blockId: res.existing_block.id, senderEmail: res.existing_block.sender_email });
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Release & trust failed');
+    } finally {
+      setActionId(null);
+    }
+  };
+
   const handleDelete = async (item: QuarantinedItem) => {
     setActionId(item.id);
     setError(null);
@@ -152,6 +180,42 @@ export default function QuarantineQueue() {
         <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-300">
           <Inbox className="h-4 w-4 text-emerald-400" />
           {notice}
+        </div>
+      )}
+      {pendingUnblock && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 text-sm text-amber-300">
+          <ShieldOff className="h-4 w-4 text-amber-400" />
+          <span className="flex-1">
+            {pendingUnblock.senderEmail} is still blocked by an active Gmail filter — trusting does not unblock automatically.
+          </span>
+          <button
+            type="button"
+            onClick={async () => {
+              setActionId(pendingUnblock.blockId);
+              try {
+                await api.unblockSender(pendingUnblock.blockId);
+                setNotice(`Sender ${pendingUnblock.senderEmail} unblocked — Gmail filter removed.`);
+                await load();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Unblock failed');
+              } finally {
+                setPendingUnblock(null);
+                setActionId(null);
+              }
+            }}
+            disabled={actionId === pendingUnblock.blockId || isMockMode}
+            className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 disabled:opacity-50"
+          >
+            {actionId === pendingUnblock.blockId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldOff className="h-3.5 w-3.5" />}
+            Also unblock sender
+          </button>
+          <button
+            type="button"
+            onClick={() => setPendingUnblock(null)}
+            className="text-xs text-zinc-400 transition hover:text-zinc-200"
+          >
+            Keep blocked
+          </button>
         </div>
       )}
 
@@ -225,6 +289,15 @@ export default function QuarantineQueue() {
                       >
                         {actionId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Inbox className="h-3.5 w-3.5" />}
                         Release to Inbox
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleReleaseAndTrust(item)}
+                        disabled={actionId === item.id || isMockMode}
+                        className="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 disabled:opacity-50"
+                      >
+                        {actionId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                        Release &amp; trust sender
                       </button>
                       <button
                         type="button"
@@ -351,6 +424,17 @@ export default function QuarantineQueue() {
                       >
                         {actionId === selected.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Inbox className="h-3.5 w-3.5" />}
                         Release to Inbox
+                      </button>
+                    )}
+                    {review.available_actions.release && (
+                      <button
+                        type="button"
+                        onClick={() => handleReleaseAndTrust(selected)}
+                        disabled={actionId === selected.id || isMockMode}
+                        className="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 disabled:opacity-50"
+                      >
+                        {actionId === selected.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                        Release &amp; trust sender
                       </button>
                     )}
                     {review.available_actions.keep && (

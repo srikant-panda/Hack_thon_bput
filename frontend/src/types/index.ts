@@ -495,6 +495,27 @@ export interface BlockedSender {
   last_error: string | null;
 }
 
+// --- Trusted senders (FP-hardening, Deliverable 1) ---
+
+export interface TrustedSender {
+  id: string;
+  sender_email: string;
+  sender_domain: string | null;
+  reason: string;
+  created_at: string | null;
+}
+
+export interface ReleaseAndTrustResult {
+  id: string;
+  status: string;
+  provider_operation_status: string;
+  message?: string | null;
+  trusted: boolean;
+  // Present when the sender still has an active provider filter — the UI must
+  // offer "also unblock" as an explicit second action (never implicit).
+  existing_block: BlockedSender | null;
+}
+
 // --- Security history (Phase 5) ---
 
 export type SecurityEventType =

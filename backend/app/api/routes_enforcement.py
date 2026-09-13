@@ -15,13 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, NotFoundError, PermissionDeniedError
 from app.core.security import CurrentUser, get_current_user
-from app.db.models import BlockedSender, ConnectorSettings, QuarantinedItem
+from app.db.models import BlockedSender, ConnectorSettings, QuarantinedItem, TrustedSender
 from app.db.session import get_db
 from app.services.action_engine import get_or_create_settings
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
 from app.services.email_providers.base import EmailProviderError
 from app.services.email_providers.gmail import gmail_provider
 from app.services.security_history_service import record_event
+from app.services.audit_service import log_action
+from app.services.trusted_senders import trust_sender, untrust_sender, list_trusted
 
 logger = logging.getLogger("cyberguard.enforcement.api")
 
@@ -67,6 +69,30 @@ class EnforcementActionResponse(BaseModel):
     status: str
     provider_operation_status: str
     message: Optional[str] = None
+
+
+class TrustedSenderRead(BaseModel):
+    id: str
+    sender_email: str
+    sender_domain: Optional[str] = None
+    reason: str
+    created_at: Optional[str] = None
+
+
+class TrustedSenderListResponse(BaseModel):
+    items: list[TrustedSenderRead]
+
+
+class ReleaseAndTrustResponse(EnforcementActionResponse):
+    trusted: bool = True
+    # Present when the trusted sender still has an active provider filter —
+    # the UI must offer "also unblock" as an explicit second action (D1).
+    existing_block: Optional[BlockedSenderRead] = None
+
+
+class TrustSenderRequest(BaseModel):
+    sender_email: str
+    reason: str = "trusted from Blocked Senders page"
 
 
 def _iso(dt) -> Optional[str]:
@@ -207,6 +233,172 @@ async def release_quarantined(
     )
     return EnforcementActionResponse(id=item.id, status=item.status, provider_operation_status="success",
                                      message="Message released back to the inbox.")
+
+@router.post("/quarantine/{item_id}/release-and-trust", response_model=ReleaseAndTrustResponse)
+async def release_and_trust_sender(
+    item_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReleaseAndTrustResponse:
+    """Release the message AND trust its sender (FP-hardening, Deliverable 1).
+
+    The provider release is identical to the plain release; additionally the
+    sender is added to the owner's trust list so future auto-enforcement for
+    that sender_email becomes recommend-only (scans still run and verdicts
+    are still shown). An existing active sender filter is NOT touched — the
+    response reports it so the UI can offer "also unblock" as an explicit
+    second action.
+    """
+    item = await _load_item(db, item_id, user)
+    if item.status != "quarantined":
+        raise AppError(f"Item is not quarantined (status: {item.status}).", code="invalid_state", status_code=400)
+
+    release_result = await release_quarantined(item_id=item_id, user=user, db=db)
+
+    subject = (item.scan_result_json or {}).get("subject") or ""
+    entry, created = await trust_sender(
+        db, user.id, item.sender_email,
+        reason=f"Released '{subject[:120]}'" if subject else "Released from quarantine",
+    )
+    await record_event(
+        db,
+        owner_user_id=user.id,
+        event_type="sender_trust",
+        actor_type="user",
+        connector_id=item.connector_id,
+        provider_message_id=item.provider_message_id,
+        sender_email=entry.sender_email,
+        subject=subject,
+        action_requested="trust_sender",
+        action_performed="none",
+        operation_status="success",
+        operation_detail=(
+            f"Sender {entry.sender_email} added to your trust list"
+            + (" (already trusted)" if not created else "")
+            + " — future auto-enforcement for this sender is recommend-only"
+        ),
+    )
+    await log_action(
+        db, user_id=user.id, actor_type="user", action="trust_sender",
+        resource=entry.sender_email, details=entry.reason,
+    )
+
+    # Honest two-step: report an active filter instead of silently removing it.
+    block = (
+        await db.execute(
+            select(BlockedSender).where(
+                BlockedSender.connector_id == item.connector_id,
+                BlockedSender.sender_email == entry.sender_email,
+                BlockedSender.status == "blocked",
+            )
+        )
+    ).scalar_one_or_none()
+
+    message = "Message released and sender added to your trust list."
+    if block is not None:
+        message += (
+            " Note: this sender is still blocked by an active Gmail filter — "
+            "unblock it explicitly on the Blocked Senders page if desired."
+        )
+    return ReleaseAndTrustResponse(
+        id=item.id,
+        status=item.status,
+        provider_operation_status="success",
+        message=message,
+        trusted=True,
+        existing_block=_serialize_block(block) if block is not None else None,
+    )
+
+
+@router.get("/trusted-senders", response_model=TrustedSenderListResponse)
+async def list_trusted_senders(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TrustedSenderListResponse:
+    rows = await list_trusted(db, user.id)
+    return TrustedSenderListResponse(
+        items=[
+            TrustedSenderRead(
+                id=row.id,
+                sender_email=row.sender_email,
+                sender_domain=row.sender_domain,
+                reason=row.reason,
+                created_at=_iso(row.created_at),
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.post("/trusted-senders", response_model=TrustedSenderRead)
+async def trust_sender_endpoint(
+    payload: TrustSenderRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TrustedSenderRead:
+    """Trust a sender directly (e.g. from the Blocked Senders page).
+
+    Trusting never modifies provider state — an active block is a separate
+    explicit action, keeping the two honest and reversible.
+    """
+    entry, created = await trust_sender(db, user.id, payload.sender_email, payload.reason)
+    if created:
+        await record_event(
+            db,
+            owner_user_id=user.id,
+            event_type="sender_trust",
+            actor_type="user",
+            sender_email=entry.sender_email,
+            action_requested="trust_sender",
+            action_performed="none",
+            operation_status="success",
+            operation_detail=f"Sender {entry.sender_email} added to your trust list — recommend-only enforcement",
+        )
+        await log_action(
+            db, user_id=user.id, actor_type="user", action="trust_sender",
+            resource=entry.sender_email, details=entry.reason,
+        )
+    return TrustedSenderRead(
+        id=entry.id,
+        sender_email=entry.sender_email,
+        sender_domain=entry.sender_domain,
+        reason=entry.reason,
+        created_at=_iso(entry.created_at),
+    )
+
+
+@router.delete("/trusted-senders/{sender_id}", response_model=EnforcementActionResponse)
+async def remove_trusted_sender(
+    sender_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EnforcementActionResponse:
+    """Remove a sender from the trust list (auto-enforcement applies again)."""
+    result = await db.execute(
+        select(TrustedSender).where(
+            TrustedSender.id == sender_id, TrustedSender.owner_user_id == user.id
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise NotFoundError("Trusted sender", sender_id)
+    await db.delete(row)
+    await db.commit()
+    await record_event(
+        db,
+        owner_user_id=user.id,
+        event_type="sender_untrust",
+        actor_type="user",
+        sender_email=row.sender_email,
+        action_requested="untrust_sender",
+        action_performed="none",
+        operation_status="success",
+        operation_detail=f"Sender {row.sender_email} removed from your trust list",
+    )
+    return EnforcementActionResponse(
+        id=row.id, status="removed", provider_operation_status="success",
+        message=f"Sender {row.sender_email} removed from your trust list.",
+    )
 
 
 @router.post("/quarantine/{item_id}/delete", response_model=EnforcementActionResponse)

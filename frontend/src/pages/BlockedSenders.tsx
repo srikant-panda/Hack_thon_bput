@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Ban, Clock, Loader2, RefreshCw, ShieldOff } from 'lucide-react';
+import { AlertTriangle, Ban, Clock, Loader2, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
 import * as api from '../services/api';
 import type { BlockedSender } from '../types';
@@ -22,6 +22,7 @@ export default function BlockedSenders() {
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +53,25 @@ export default function BlockedSenders() {
     }
   };
 
+  // Two-action honesty (D1): "Trust sender" never removes an active filter.
+  // Unblocking remains a separate explicit button on this page.
+  const handleTrust = async (block: BlockedSender) => {
+    setActionId(block.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.trustSender(block.sender_email, 'trusted from Blocked Senders page');
+      setNotice(
+        `${block.sender_email} added to your trust list — future auto-enforcement for this sender is recommend-only. The Gmail filter stays active until you unblock it explicitly.`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Trust failed');
+    } finally {
+      setActionId(null);
+    }
+  };
+
   const activeBlocks = blocks.filter((b) => b.status === 'blocked');
   const pastBlocks = blocks.filter((b) => b.status !== 'blocked');
 
@@ -59,7 +79,7 @@ export default function BlockedSenders() {
     <div className="space-y-6">
       <PageHeader
         title="Blocked Senders"
-        description="Senders auto-blocked via Gmail filters after high or critical verdicts. Temporary blocks expire automatically and their filters are removed by the scheduler."
+        description="Senders auto-blocked via Gmail filters after high or critical verdicts. Temporary blocks expire automatically and their filters are removed by the scheduler. Trusting a sender makes future enforcement recommend-only — it never removes the active filter; use Unblock for that."
       />
 
       {isMockMode && (
@@ -73,6 +93,12 @@ export default function BlockedSenders() {
         <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">
           <AlertTriangle className="h-4 w-4 text-red-400" />
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-300">
+          <ShieldCheck className="h-4 w-4 text-emerald-400" />
+          {notice}
         </div>
       )}
 
@@ -128,15 +154,26 @@ export default function BlockedSenders() {
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-2">
                   {block.status === 'blocked' && (
-                    <button
-                      type="button"
-                      onClick={() => handleUnblock(block)}
-                      disabled={actionId === block.id || isMockMode}
-                      className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-50"
-                    >
-                      {actionId === block.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldOff className="h-3.5 w-3.5" />}
-                      Unblock Sender
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleTrust(block)}
+                        disabled={actionId === block.id || isMockMode}
+                        className="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 disabled:opacity-50"
+                      >
+                        {actionId === block.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                        Trust Sender
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUnblock(block)}
+                        disabled={actionId === block.id || isMockMode}
+                        className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-50"
+                      >
+                        {actionId === block.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldOff className="h-3.5 w-3.5" />}
+                        Unblock Sender
+                      </button>
+                    </>
                   )}
                 </div>
               </div>

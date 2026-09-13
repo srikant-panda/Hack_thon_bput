@@ -23,15 +23,40 @@ from app.db.models import (
 from app.schemas.email import NormalizedMessage
 from app.schemas.scan_results import ScanResult
 from app.services.security_history_service import record_event
+from app.services.audit_service import log_action
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
 from app.services.email_providers.base import EmailProviderError
 from app.services.email_providers import get_provider
+from app.services.trusted_senders import TRUST_ANNOTATION, is_sender_trusted
 
 logger = logging.getLogger("cyberguard.action_engine")
 
 
 class EnforcementOutcome(Exception):
     """Raised internally to short-circuit with an honest failure result."""
+
+
+def corroboration_check(scan: ScanResult) -> tuple[bool, str]:
+    """Corroborated auto-enforcement gate (FP-hardening, Deliverable 2).
+
+    Provider-backed auto-quarantine / auto sender-block executes ONLY when the
+    overall verdict is critical AND at least 2 engines independently scored
+    high or critical. A single-engine critical (the classic false-positive
+    signature: one engine screams while the others shrug — e.g. the Medium
+    digest case high/medium/safe) is downgraded to review-recommended with no
+    provider write. Returns (met, human-readable reason).
+    """
+    if scan.overall_severity != "critical":
+        return False, f"overall severity is '{scan.overall_severity}', below critical"
+    strong = [
+        analysis.engine
+        for analysis in scan.feature_analyses
+        if analysis.severity in ("high", "critical")
+    ]
+    if len(strong) < 2:
+        engines = ", ".join(f"{a.engine}={a.severity}" for a in scan.feature_analyses)
+        return False, f"only {len(strong)} engine(s) scored high+ ({engines or 'none'})"
+    return True, "corroboration_met: " + ", ".join(strong)
 
 
 def _sender_email(from_header: str) -> str:
@@ -107,6 +132,76 @@ async def enforce_scan_result(
         return scan
 
     sender = _sender_email(message.sender)
+
+    # Trust list (Deliverable 1): scans still run and results are still shown,
+    # but enforcement is recommend-only with an explicit annotation.
+    if await is_sender_trusted(db, connector.owner_user_id, sender):
+        scan.provider_operation_status = "skipped_trusted_sender"
+        scan.provider_operation_detail = (
+            f"{TRUST_ANNOTATION} Auto-quarantine was skipped; the verdict and "
+            "recommended action are advisory only. Nothing was changed in the mailbox."
+        )
+        await record_event(
+            db,
+            owner_user_id=connector.owner_user_id,
+            event_type="enforcement_decision",
+            actor_type="system",
+            connector=connector,
+            provider_message_id=message.provider_message_id,
+            sender_email=sender,
+            subject=message.subject,
+            severity=scan.overall_severity,
+            score=scan.overall_score,
+            action_requested=scan.recommended_action,
+            action_performed="none",
+            operation_status="skipped_trusted_sender",
+            operation_detail="corroboration not required: sender is in your trust list — recommend-only",
+        )
+        await log_action(
+            db, user_id=connector.owner_user_id, actor_type="system",
+            action="auto_enforcement_skipped", resource=message.provider_message_id,
+            details="sender is in trust list; recommend-only",
+        )
+        await _log(db, connector, "enforcement", "success",
+                   f"Trusted sender {sender}: recommend-only for {scan.message_id}")
+        return scan
+
+    # Corroborated auto-enforcement (Deliverable 2): without critical overall
+    # AND >=2 engines at high+, the recommendation stays review-only.
+    met, reason = corroboration_check(scan)
+    if not met:
+        scan.provider_operation_status = "review_recommended"
+        scan.provider_operation_detail = (
+            f"corroboration_missing ({reason}). Auto-enforcement withheld: the "
+            "recommendation is advisory only — review it in Security History. "
+            "Nothing was changed in the mailbox."
+        )
+        await record_event(
+            db,
+            owner_user_id=connector.owner_user_id,
+            event_type="enforcement_decision",
+            actor_type="system",
+            connector=connector,
+            provider_message_id=message.provider_message_id,
+            sender_email=sender,
+            subject=message.subject,
+            severity=scan.overall_severity,
+            score=scan.overall_score,
+            explanation=scan.overall_explanation,
+            action_requested=scan.recommended_action,
+            action_performed="none",
+            operation_status="corroboration_missing",
+            operation_detail=f"corroboration_missing ({reason}); recommend-only",
+        )
+        await log_action(
+            db, user_id=connector.owner_user_id, actor_type="system",
+            action="auto_enforcement_skipped", resource=message.provider_message_id,
+            details=f"corroboration_missing ({reason}); recommend-only",
+        )
+        await _log(db, connector, "enforcement", "success",
+                   f"corroboration_missing for {scan.message_id}: {reason}")
+        return scan
+
     try:
         # Phase 6: resolve the provider through the neutral contract — the
         # engine never touches Gmail-specific code.
@@ -211,7 +306,7 @@ async def enforce_scan_result(
             action_requested=scan.recommended_action,
             action_performed="quarantine",
             operation_status="success",
-            operation_detail=f"Label '{provider.quarantine_label_name}' applied, INBOX removed",
+            operation_detail=f"corroboration_met; Label '{provider.quarantine_label_name}' applied, INBOX removed",
             quarantined_item_id=item.id,
         )
         if rule_id:

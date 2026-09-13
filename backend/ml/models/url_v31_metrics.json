@@ -1,0 +1,10 @@
+{
+  "model": "url_xgb_v3.1.pkl",
+  "data_mode": "real-feed",
+  "n_rows": 109000,
+  "n_benign": 59000,
+  "n_phishing": 50000,
+  "test_auc": 0.9985,
+  "test_f1": 0.9795,
+  "test_accuracy": 0.9812
+}
