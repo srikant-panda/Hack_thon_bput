@@ -3,7 +3,6 @@
 import asyncio
 import uuid
 from typing import Any, Optional
-
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -313,6 +312,7 @@ async def analyze_media_upload(
     event = Event(
         id=event_id,
         organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         event_type="deepfake_media",
         source=ANALYSIS_MEDIA_SOURCE,
         raw_data={
@@ -338,11 +338,12 @@ async def analyze_media_upload(
             "file_type": content_type,
             "size_bytes": size_bytes,
         }
-
+    
     db.add(
         MediaFile(
             id=str(uuid.uuid4()),
             event_id=event_id,
+            owner_user_id=tenant.owner_user_id,
             file_name=media_record["file_name"],
             storage_path=media_record["storage_path"],
             file_type=media_record["file_type"],
