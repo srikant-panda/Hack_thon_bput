@@ -72,6 +72,16 @@ def _load_top1m_set() -> set[str]:
     return _TOP1M_SET
 
 
+def top1m_domain_set() -> set[str]:
+    """Public accessor: the in-memory top-1M set (loaded once, O(1) lookups).
+
+    Used by the URL v3 ML feature extractor (ml/url_features_v3.py) and the
+    training script (ml/scripts/train_url_v3.py) so training and inference
+    share exactly the same reputation set.
+    """
+    return _load_top1m_set()
+
+
 def is_domain_in_top1m(domain: str) -> bool:
     """Check whether domain or its registrable domain exists in Umbrella top-1M."""
     if not domain:

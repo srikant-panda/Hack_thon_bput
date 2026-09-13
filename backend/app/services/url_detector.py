@@ -7,7 +7,7 @@ import math
 from collections import Counter
 from urllib.parse import urlparse
 
-from app.services.ml_inference import ml_indicator, predict_url
+from app.services.ml_inference import ml_indicator, predict_url, url_model_artifact
 
 BRAND_NAMES = (
     "microsoft",
@@ -294,5 +294,5 @@ def analyze_url_heuristics(url: str) -> list[dict]:
     if probability is not None:
         # Safety principle: ML may raise but never lower the heuristic
         # verdict (monotonic blending — see ml_inference.blend_scores).
-        indicators.append(ml_indicator("url_xgb.pkl", probability))
+        indicators.append(ml_indicator(url_model_artifact(), probability))
     return indicators

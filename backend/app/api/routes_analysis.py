@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+import logging
 from app.ai.openrouter_client import call_openrouter
 from app.ai.prompt_templates import (
     ACCOUNT_TAKEOVER_SYSTEM_PROMPT,
@@ -42,6 +42,8 @@ from app.services.network_threat_detector import analyze_network_heuristics
 from app.services.phishing_detector import analyze_email_heuristics
 from app.services.scoring_service import get_severity
 from app.services.url_detector import analyze_url_heuristics
+
+logger = logging.getLogger("cyberguard.security")
 
 router = APIRouter(prefix="/analysis", tags=["Analysis"])
 

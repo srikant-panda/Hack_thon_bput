@@ -1,11 +1,56 @@
 {
   "meta": {
-    "generated_at": "2026-09-13T17:07:18.472854+00:00",
-    "git_tip": "117fdd6"
+    "generated_at": "2026-09-13T19:03:57.803377+00:00",
+    "git_tip": "9d20eed"
   },
-  "engines": {},
+  "engines": {
+    "url_detector_blended": {
+      "cases": 800,
+      "positives": 300,
+      "precision": 0.9123376623376623,
+      "recall": 0.9366666666666666,
+      "f1": 0.9243421052631579,
+      "auc": 0.9655166666666667,
+      "mal_mean": 34.75,
+      "ben_mean": 6.13,
+      "band_gap": 28.62,
+      "mw_p": 1.812410177168828e-111,
+      "threshold": 20.44,
+      "data_mode": "cache"
+    },
+    "url_detector_heuristic_only": {
+      "cases": 800,
+      "positives": 300,
+      "precision": 0.6929824561403509,
+      "recall": 0.5266666666666666,
+      "f1": 0.5984848484848485,
+      "auc": 0.7658866666666666,
+      "mal_mean": 11.4,
+      "ben_mean": 3.63,
+      "band_gap": 7.7700000000000005,
+      "mw_p": 2.063044495601158e-40,
+      "threshold": 7.515000000000001
+    }
+  },
   "properties": {},
   "http": {},
-  "provenance": [],
-  "findings": []
+  "provenance": [
+    {
+      "name": "phishing_urls",
+      "mode": "cache",
+      "rows": 300,
+      "sha256": null,
+      "url": "https://openphish.com/feed.txt",
+      "fetched_at": "2026-09-13T19:03:59.681221+00:00"
+    }
+  ],
+  "findings": [
+    "FIXED (url_xgb_v3): v2 scored benign top-1m domains at phishing probability ~0.76 (long tracking URLs). v3 retrains on 50k top-1M benign URLs (10k tracking-augmented) + 50k real Phishing.Database URLs with domain/path/query entropy split features \u2014 benign domains with long tracking query strings now score <0.05.",
+    "Real OpenPhish URLs hosted on legitimate platforms (vercel.app, godaddysites.com) are structurally plain and score low on URL heuristics (heuristic-only AUC ~0.77); the v2 ML model detects them (blended AUC higher). This validates the hybrid design for platform-hosted phishing.",
+    "url FN: FN payload=https://kqid7e1vkh3d0r88k3d.vercel.app/nsvw35re4hbarefsdbvzxcv score=35 indicators=['url_entropy:medium', 'random_path_segment:medium', 'ml_model:critical']",
+    "url FN: FN payload=https://www.welcome-trezor-bridge.godaddysites.com/ score=30 indicators=['url_entropy:medium', 'ml_model:critical']",
+    "url FN: FN payload=https://iamivanaalawicash.blogspot.com/ score=25 indicators=['ml_model:critical']",
+    "url FN: FN payload=https://www.iamivanaalawicash.blogspot.com/ score=25 indicators=['ml_model:critical']",
+    "url FN: FN payload=https://lnk.ink/AQDO7 score=25 indicators=['ml_model:critical']"
+  ]
 }

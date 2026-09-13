@@ -129,13 +129,13 @@ def url_model_version() -> str:
         with (models_dir() / "calibration.json").open(encoding="utf-8") as fh:
             calibration = json.load(fh)
         version = str(calibration.get("url_model_version", "v2"))
-        return version if version in ("v1", "v2") else "v2"
+        return version if version in ("v1", "v2", "v3") else "v2"
     except Exception:
         try:
             from app.core.calibration import get_calibration
 
             version = str(get_calibration().get("url_model_version", "v2"))
-            return version if version in ("v1", "v2") else "v2"
+            return version if version in ("v1", "v2", "v3") else "v2"
         except Exception:
             return "v2"
 
@@ -145,12 +145,21 @@ def url_model_artifact() -> str:
     bundle = get_url_model()
     if bundle is not None:
         return bundle[1]
-    return "url_xgb_v2.pkl" if url_model_version() == "v2" else "url_xgb.pkl"
+    return {
+        "v3": "url_xgb_v3.pkl",
+        "v2": "url_xgb_v2.pkl",
+    }.get(url_model_version(), "url_xgb.pkl")
 
 
 def _load_url_model():
     base = models_dir()
-    if url_model_version() == "v2":
+    if url_model_version() == "v3":
+        try:
+            model = joblib.load(base / "url_xgb_v3.pkl")
+            return model, "url_xgb_v3.pkl"
+        except Exception as exc:
+            logger.warning("url model v3 unavailable — falling back to v2: %s", exc)
+    if url_model_version() in ("v2", "v3"):
         try:
             model = joblib.load(base / "url_xgb_v2.pkl")
             return model, "url_xgb_v2.pkl"
@@ -452,13 +461,23 @@ SUSPICIOUS_URL_TLDS = {"xyz", "top", "zip", "ru", "cn", "tk", "click", "link", "
 
 
 def extract_url_features(url: str, version: str = "v2") -> np.ndarray:
-    """MUST remain identical to training (ml/train_models.py):
+    """MUST remain identical to training:
+    v1/v2 -> ml/train_models.py; v3 -> ml/url_features_v3.py (shared module —
+    both training and inference import it, so they cannot drift).
     Base (8): [length, entropy, digit_ratio, has_ip, has_at_symbol,
                suspicious_tld, http_only, num_subdomains].
     v2 additions (7): domain_in_top1m, path_shape_cat, is_uuid_like,
                       is_hex32_like, is_short_id, is_homepage, is_other.
+    v3 (19): reputation + split entropy/length features, see
+             ml/url_features_v3.py FEATURE_COLUMNS_V3.
     """
     from urllib.parse import urlparse
+
+    if version == "v3":
+        from ml.url_features_v3 import extract_url_features_v3, vectorize_v3
+        from app.core.url_reputation import top1m_domain_set
+
+        return np.array(vectorize_v3(extract_url_features_v3(url, top1m_domain_set())), dtype=np.float64)
 
     try:
         parsed = urlparse(url)
@@ -542,7 +561,7 @@ def predict_url(url: str) -> float | None:
         return None
     try:
         model, artifact = bundle
-        ver = "v2" if "v2" in artifact else "v1"
+        ver = "v3" if "v3" in artifact else ("v2" if "v2" in artifact else "v1")
         features = extract_url_features(url, version=ver).reshape(1, -1)
         return float(model.predict_proba(features)[0][1])
     except Exception as exc:

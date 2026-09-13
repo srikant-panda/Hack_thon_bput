@@ -1,0 +1,10 @@
+{
+  "model": "url_xgb_v3",
+  "data_mode": "real-feed",
+  "n_rows": 100000,
+  "n_benign": 50000,
+  "n_phishing": 50000,
+  "test_auc": 0.9987,
+  "test_f1": 0.983,
+  "test_accuracy": 0.9831
+}

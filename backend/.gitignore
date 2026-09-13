@@ -8,3 +8,6 @@ __pycache__/
 *.db
 uploads/
 
+
+# ---- ML training data caches (re-downloadable by ml/scripts/*) ----
+ml/data/cache/
