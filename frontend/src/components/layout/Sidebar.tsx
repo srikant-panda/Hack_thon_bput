@@ -1,61 +1,10 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import {
-  Ban,
-  Bell,
-  Bot,
-  Building2,
-  ChevronsLeft,
-  ChevronsRight,
-  ClipboardCheck,
-  FileBarChart,
-  KeyRound,
-  LayoutDashboard,
-  Link,
-  Mail,
-  Network,
-  PackageOpen,
-  ScrollText,
-  Settings,
-  Settings2,
-  Shield,
-  ShieldAlert,
-  UserX,
-  Video,
-  Zap,
-} from 'lucide-react';
+import { Bot, ChevronsLeft, ChevronsRight, Shield } from 'lucide-react';
 import { useUiStore } from '../../store/uiStore';
 import { useAuthStore } from '../../store/authStore';
 import * as api from '../../services/api';
-
-const NAV_ITEMS: { to: string; label: string; icon: typeof Bell }[] = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/phishing', label: 'Phishing Analysis', icon: Mail },
-  { to: '/url-analysis', label: 'URL Analysis', icon: Link },
-  { to: '/impersonation', label: 'Impersonation', icon: UserX },
-  { to: '/deepfake', label: 'Deepfake Detection', icon: Video },
-  { to: '/account-takeover', label: 'Account Takeover', icon: KeyRound },
-  { to: '/network-threats', label: 'Network & API', icon: Network },
-  { to: '/alerts', label: 'Alerts', icon: Bell },
-  { to: '/incidents', label: 'Incidents', icon: ShieldAlert },
-  { to: '/response-actions', label: 'Response Actions', icon: Zap },
-  { to: '/email-connectors', label: 'Email Connectors', icon: Mail },
-  { to: '/quarantine', label: 'Quarantine Queue', icon: PackageOpen },
-  { to: '/blocked-senders', label: 'Blocked Senders', icon: Ban },
-  { to: '/security-history', label: 'Security History', icon: ScrollText },
-  { to: '/notification-log', label: 'Notification Log', icon: Bell },
-  { to: '/organization', label: 'Organization & Team', icon: Building2 },
-  { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText },
-  { to: '/reports', label: 'Reports', icon: FileBarChart },
-  { to: '/settings', label: 'Settings', icon: Settings },
-];
-
-const ORG_NAV_ITEMS: { to: string; label: string; icon: typeof Bell; adminOnly?: boolean }[] = [
-  { to: '/approvals', label: 'Approval Queue', icon: ClipboardCheck },
-  { to: '/blocklist', label: 'Block List', icon: Ban },
-  { to: '/action-log', label: 'Action Log', icon: ScrollText },
-  { to: '/policies', label: 'Policy Management', icon: Settings2, adminOnly: true },
-];
+import { getNavSections, type NavItem } from '../../nav';
 
 function linkClass(isActive: boolean, collapsed: boolean) {
   return `flex items-center gap-3 border-l-2 py-2 pr-3 text-sm transition ${
@@ -95,8 +44,6 @@ export default function Sidebar() {
       clearInterval(interval);
     };
   }, [isOrgWorkspace]);
-
-  type NavItem = { to: string; label: string; icon: typeof Bell; adminOnly?: boolean };
 
   const renderItems = (items: NavItem[]) =>
     items.map(({ to, label, icon: Icon, adminOnly }) => {
@@ -138,24 +85,18 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Navigation */}
+      {/* Navigation — workspace-scoped via src/nav.ts (single source of truth) */}
       <nav className="flex-1 overflow-y-auto py-3">
-        {renderItems(
-          orgEnabled
-            ? NAV_ITEMS
-            : NAV_ITEMS.filter((item) => item.to !== '/organization'),
-        )}
-
-        {isOrgWorkspace && (
-          <>
-            <div className={`mt-3 border-t border-zinc-800/80 pt-3 ${collapsed ? '' : 'px-4'}`}>
+        {getNavSections({ isOrg: isOrgWorkspace, can }).map((section, idx) => (
+          <div key={section.section}>
+            <div className={`mt-3 border-t border-zinc-800/80 pt-3 ${collapsed ? '' : 'px-4'} ${idx === 0 ? 'mt-0 border-t-0' : ''}`}>
               {!collapsed && (
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Organization</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">{section.label}</p>
               )}
             </div>
-            {renderItems(ORG_NAV_ITEMS)}
-          </>
-        )}
+            {renderItems(section.items)}
+          </div>
+        ))}
       </nav>
 
       {/* Bottom section */}

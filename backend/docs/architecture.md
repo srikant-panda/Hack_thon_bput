@@ -70,6 +70,29 @@ The backend is the only holder of the **service role key**; the browser only eve
 | Scoring | `app/services/scoring_service.py` | Indicator weights (critical 25 / high 15 / medium 5), severity bands |
 | Data | `db/schema.sql` | 7 enums, 11 tables, indexes, RLS policies, `handle_new_user` trigger, response catalog seed |
 
+## Workspace-scoped navigation (frontend)
+
+Navigation and route guarding share a single source of truth:
+`frontend/src/nav.ts`. Every nav item declares `scope` (`user` | `org` |
+`both`) and a section; `getNavSections({ isOrg, can })` resolves what the
+active workspace may see, and `isOrgScopeRoute(path)` powers the
+`WorkspaceGuard` route wrapper.
+
+| Nav item | Personal (user) | Org workspace |
+|---|---|---|
+| Dashboard, Phishing, URL, Impersonation, Deepfake | yes | yes |
+| Log Analysis (paste-box) | yes | yes |
+| Email Connectors, Quarantine, Blocked Senders, Security History, Notification Log, Settings | yes | yes |
+| Account Takeover, Network & API | no | yes |
+| Alerts, Incidents, Response Actions, Audit Logs, Reports | no | yes |
+| Approvals, Block List, Action Log, Policies, Org Mgmt | no | yes (admin-gated) |
+| Admin Users | no | yes (admin-gated) |
+
+In personal mode, direct URLs to org-scope routes render the ComingSoon
+placeholder ("This module is part of the Organization workspace.") — no
+redirect loops; backend org endpoints additionally answer 501 while
+`ORG_ENABLED=false`.
+
 ## Data Flow (detection-to-response pipeline)
 
 ```

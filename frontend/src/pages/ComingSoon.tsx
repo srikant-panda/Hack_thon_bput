@@ -6,10 +6,18 @@ import { useAuthStore } from '../store/authStore';
  * Placeholder for frozen organization features (Phase -1).
  * Rendered when ORG_ENABLED=false server-side; reactivates with the Orgs Phase.
  */
-export default function ComingSoon({ title = 'Organization & Team' }: { title?: string }) {
+export default function ComingSoon({
+  title = 'Organization & Team',
+  message,
+}: {
+  title?: string;
+  message?: string;
+}) {
   const orgEnabled = useAuthStore((s) => s.orgEnabled);
 
-  if (orgEnabled) return null; // feature re-activated; let the real page render
+  // Feature-frozen mode (no explicit message): hide when orgs activate.
+  // Workspace-guard mode (explicit message): always render the notice.
+  if (!message && orgEnabled) return null; // re-activated; let the real page render
 
   return (
     <div className="cyber-grid flex min-h-[70vh] items-center justify-center px-4">
@@ -22,8 +30,8 @@ export default function ComingSoon({ title = 'Organization & Team' }: { title?: 
           <Clock className="h-3 w-3" /> COMING SOON
         </div>
         <p className="mt-4 text-sm leading-relaxed text-zinc-400">
-          Organization accounts — multi-analyzer workspaces, team roles, and shared queues — are on
-          the roadmap. Your personal workspace is fully active in the meantime.
+          {message ??
+            'Organization accounts — multi-analyzer workspaces, team roles, and shared queues — are on the roadmap. Your personal workspace is fully active in the meantime.'}
         </p>
         <Link
           to="/dashboard"

@@ -145,3 +145,18 @@ consequences. Newest entries at the bottom.
   `users.notification_email` — connected mailboxes are never used for system
   notifications (privacy/spam boundary). `backend` was added to the spec's
   notification_logs columns to record the actual delivery path.
+
+- **2026-09-13 — Workspace-scoped navigation from a single nav source; Log Analysis as the client log-paste feature (frontend).**
+  Per the Excalidraw step-1 client/organization split: personal workspaces get
+  the six analysis features (Dashboard, Phishing, URL, Impersonation,
+  Deepfake, and the new Log Analysis paste-box) plus the email-security
+  pages; org-side modules (Account Takeover, Network & API, Alerts,
+  Incidents, Response Actions, Audit Logs, Reports, approvals/policies/org
+  management) are hidden in personal mode AND route-guarded — the guard
+  renders a ComingSoon placeholder instead of redirecting, and the backend's
+  501/401 responses remain the second line of defense. `frontend/src/nav.ts`
+  is the only nav list; Sidebar and route guards both consume it, so moving a
+  feature between scopes is a one-line change. Log Analysis is the
+  client-facing "log paste and analyze" feature: it auto-detects auth-log vs
+  network-flow JSON, drives the existing detectors analysis-only, and shows
+  honest format errors — no sample auto-fills, no fake data.

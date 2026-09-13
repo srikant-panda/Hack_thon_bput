@@ -12,6 +12,8 @@ import EmailConnectors from './pages/EmailConnectors';
 import BlockedSenders from './pages/BlockedSenders';
 import SecurityHistory from './pages/SecurityHistory';
 import NotificationLog from './pages/NotificationLog';
+import LogAnalysis from './pages/LogAnalysis';
+import { isOrgScopeRoute } from './nav';
 import { useAuthStore } from './store/authStore';
 import Dashboard from './pages/Dashboard';
 import ApprovalQueue from './pages/ApprovalQueue';
@@ -45,6 +47,21 @@ function OrgFeature({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Workspace-scoped route guard (Excalidraw step-1): org-scope routes render
+ * the ComingSoon placeholder in personal workspaces — no redirect loops.
+ * Scope comes from src/nav.ts (single source of truth).
+ */
+function WorkspaceGuard({ path, children }: { path: string; children: React.ReactNode }) {
+  const activeOrganization = useAuthStore((s) => s.activeOrganization);
+  const orgEnabled = useAuthStore((s) => s.orgEnabled);
+  const isOrg = Boolean(orgEnabled && activeOrganization && !activeOrganization.is_personal);
+  if (isOrgScopeRoute(path) && !isOrg) {
+    return <ComingSoon message="This module is part of the Organization workspace." />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -62,50 +79,57 @@ export default function App() {
           <Route path="/email-connectors" element={<EmailConnectors />} />
           <Route path="/blocked-senders" element={<BlockedSenders />} />
           <Route path="/security-history" element={<SecurityHistory />} />
+          <Route path="/log-analysis" element={<LogAnalysis />} />
           <Route path="/notification-log" element={<NotificationLog />} />
-          <Route path="/approvals" element={<ApprovalQueue />} />
+          <Route path="/approvals" element={<WorkspaceGuard path="/approvals"><ApprovalQueue /></WorkspaceGuard>} />
           <Route path="/quarantine" element={<QuarantineQueue />} />
-          <Route path="/blocklist" element={<BlockList />} />
-          <Route path="/action-log" element={<ActionLog />} />
+          <Route path="/blocklist" element={<WorkspaceGuard path="/blocklist"><BlockList /></WorkspaceGuard>} />
+          <Route path="/action-log" element={<WorkspaceGuard path="/action-log"><ActionLog /></WorkspaceGuard>} />
           <Route
             path="/policies"
             element={
+              <WorkspaceGuard path="/policies">
               <RoleGuard minimumRole="admin">
                 <PolicyManagement />
               </RoleGuard>
+              </WorkspaceGuard>
             }
           />
           <Route
             path="/organization"
             element={
+              <WorkspaceGuard path="/organization">
               <OrgFeature>
                 <OrganizationManagement />
               </OrgFeature>
+              </WorkspaceGuard>
             }
           />
           <Route
             path="/admin/users"
             element={
+              <WorkspaceGuard path="/admin/users">
               <OrgFeature>
                 <RoleGuard minimumRole="admin">
                   <AdminUsers />
                 </RoleGuard>
               </OrgFeature>
+              </WorkspaceGuard>
             }
           />
           <Route path="/phishing" element={<PhishingAnalysis />} />
           <Route path="/url-analysis" element={<UrlAnalysis />} />
           <Route path="/impersonation" element={<ImpersonationAnalysis />} />
           <Route path="/deepfake" element={<DeepfakeAnalysis />} />
-          <Route path="/account-takeover" element={<AccountTakeover />} />
-          <Route path="/network-threats" element={<NetworkThreats />} />
-          <Route path="/alerts" element={<Alerts />} />
+          <Route path="/account-takeover" element={<WorkspaceGuard path="/account-takeover"><AccountTakeover /></WorkspaceGuard>} />
+          <Route path="/network-threats" element={<WorkspaceGuard path="/network-threats"><NetworkThreats /></WorkspaceGuard>} />
+          <Route path="/alerts" element={<WorkspaceGuard path="/alerts"><Alerts /></WorkspaceGuard>} />
           <Route path="/alerts/:id" element={<AlertDetail />} />
-          <Route path="/incidents" element={<Incidents />} />
+          <Route path="/incidents" element={<WorkspaceGuard path="/incidents"><Incidents /></WorkspaceGuard>} />
           <Route path="/incidents/:id" element={<IncidentDetail />} />
-          <Route path="/response-actions" element={<ResponseActions />} />
-          <Route path="/audit-logs" element={<AuditLogs />} />
-          <Route path="/reports" element={<Reports />} />
+          <Route path="/response-actions" element={<WorkspaceGuard path="/response-actions"><ResponseActions /></WorkspaceGuard>} />
+          <Route path="/audit-logs" element={<WorkspaceGuard path="/audit-logs"><AuditLogs /></WorkspaceGuard>} />
+          <Route path="/reports" element={<WorkspaceGuard path="/reports"><Reports /></WorkspaceGuard>} />
           <Route path="/settings" element={<Settings />} />
         </Route>
         <Route path="/" element={<Landing />} />
