@@ -114,8 +114,17 @@ class GmailProvider:
         return response.json()
 
     async def get_profile(self, access_token: str) -> dict:
-        """GET /users/me/profile → {email_address, messages_total, ...}."""
-        return await self._request("GET", f"{GMAIL_API_BASE}/users/me/profile", access_token)
+        """GET /users/me/profile, normalized to snake_case keys.
+
+        The Gmail API returns camelCase (emailAddress, messagesTotal, ...);
+        the live API casing was verified against a real connection."""
+        raw = await self._request("GET", f"{GMAIL_API_BASE}/users/me/profile", access_token)
+        return {
+            "email_address": raw.get("emailAddress"),
+            "messages_total": raw.get("messagesTotal"),
+            "threads_total": raw.get("threadsTotal"),
+            "history_id": raw.get("historyId"),
+        }
 
     async def test_connection(self, access_token: str) -> dict:
         """Validate the token against the profile endpoint; return safe summary."""
