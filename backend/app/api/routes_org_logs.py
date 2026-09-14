@@ -139,6 +139,18 @@ async def ingest_org_log(
             created_by=f"api_key:{org.id}",
         )
         alert_id = alert.id
+        # ORG-4 trigger: critical/high findings page the critical_log group.
+        from app.services.org_notification_service import critical_log_email, send_event
+        n_subject, n_body = critical_log_email(result["summary"], result["severity"], result["log_type"])
+        await send_event(
+            db,
+            organization_id=org.id,
+            event_type="critical_log",
+            subject=n_subject,
+            body_html=n_body,
+            event_metadata={"log_id": log_event.id, "log_type": result["log_type"],
+                            "severity": result["severity"], "risk_score": result["risk_score"]},
+        )
 
     await db.commit()
     return LogIngestResponse(

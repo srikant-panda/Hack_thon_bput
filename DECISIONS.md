@@ -259,3 +259,22 @@ consequences. Newest entries at the bottom.
   admin/analyst-readable and viewer-blocked at both the API and RLS layers;
   logs reach the owning org through the parent server row's
   org_member_role() predicate.
+
+- **2026-09-15 — ORG-4: role-grouped notification lists with min-role event routing, org-level and separate from Phase 7 (Orgs Phase).**
+  Notification recipients are ORG assets, not per-user settings: an
+  organization registers MULTIPLE addresses, each assigned to a role group
+  (admin/analyst/viewer), and each event type declares the MINIMUM role
+  group that receives it (admin → admins only; analyst → analysts+admins;
+  viewer → everyone). Defaults: server_down/mail_server_down/critical_log →
+  analyst, impersonation → admin (brand-sensitive, admins only by default).
+  Wired triggers: mail-server connect failure → mail_server_down, fetch
+  failure on a connected server → server_down, medium+ log ingest →
+  critical_log, gateway lookalike-domain/display-name-spoof indicators →
+  impersonation. Delivery reuses the Phase 7 backend (_deliver: DB-logged by
+  default, best-effort SMTP) with per-recipient error isolation, and every
+  send persists an org_notification_logs row with per-recipient outcomes;
+  a disabled event type produces no sends and no log row (silent no-op).
+  RLS: all three tables are admin/analyst-readable and viewer-blocked at
+  both the API and RLS layers; writes are admin-only. The Phase 7 per-user
+  notification_email paths are untouched — org notifications are a parallel
+  system with its own tables, routing, and templates.

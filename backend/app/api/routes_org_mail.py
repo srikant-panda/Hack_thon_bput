@@ -123,6 +123,20 @@ async def _apply_connect(db: AsyncSession, server: OrgMailServer, credentials: d
         server.status = "error"
         server.last_error = str(exc)
         await log_server_event(db, server.id, "error", f"Connect failed: {exc}")
+        # ORG-4 trigger: notify the mail_server_down role group.
+        from app.services.org_notification_service import (
+            mail_server_down_email,
+            send_event,
+        )
+        subject, body = mail_server_down_email(server.name, server.provider_type, str(exc))
+        await send_event(
+            db,
+            organization_id=server.organization_id,
+            event_type="mail_server_down",
+            subject=subject,
+            body_html=body,
+            event_metadata={"server_id": server.id, "provider": server.provider_type},
+        )
         raise
 
 
@@ -231,6 +245,17 @@ async def fetch_recent_emails(
     except TransportError as exc:
         server.last_error = str(exc)
         await log_server_event(db, server.id, "error", f"Fetch failed: {exc}")
+        # ORG-4 trigger: a connected server failing fetch = infrastructure down.
+        from app.services.org_notification_service import send_event, server_down_email
+        subject, body = server_down_email(server.name, str(exc))
+        await send_event(
+            db,
+            organization_id=org_id,
+            event_type="server_down",
+            subject=subject,
+            body_html=body,
+            event_metadata={"server_id": server.id, "provider": server.provider_type},
+        )
         await db.commit()
         raise ValidationError(str(exc))
     await log_server_event(db, server.id, "scan", f"Fetched {len(messages)} message(s) for scanning",

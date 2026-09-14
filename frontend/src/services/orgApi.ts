@@ -362,3 +362,89 @@ export function updateMailServerSettings(
     body: JSON.stringify({ settings }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// ORG-4: org email notification groups
+// ---------------------------------------------------------------------------
+
+export type RoleGroup = 'admin' | 'analyst' | 'viewer';
+export type OrgEventType = 'server_down' | 'mail_server_down' | 'critical_log' | 'impersonation';
+
+export interface NotificationEmail {
+  id: string;
+  email: string;
+  role: RoleGroup;
+  is_enabled: boolean;
+  created_at?: string;
+}
+
+export interface NotificationSetting {
+  event_type: string;
+  min_role: RoleGroup;
+  is_enabled: boolean;
+  updated_at?: string;
+}
+
+export interface NotificationLogEntry {
+  id: string;
+  event_type: string;
+  recipients: Array<{ email: string; role: string; status: string; error_detail?: string | null }>;
+  subject: string;
+  event_metadata: Record<string, unknown> | null;
+  status: 'sent' | 'failed' | 'skipped';
+  error_detail: string | null;
+  created_at: string | null;
+}
+
+export function listNotificationEmails(orgId: string): Promise<NotificationEmail[]> {
+  return apiFetch(`/org/${orgId}/notifications/emails`);
+}
+
+export function addNotificationEmail(
+  orgId: string,
+  email: string,
+  role: RoleGroup,
+): Promise<NotificationEmail> {
+  return apiFetch(`/org/${orgId}/notifications/emails`, {
+    method: 'POST',
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+export function updateNotificationEmail(
+  orgId: string,
+  emailId: string,
+  patch: { role?: RoleGroup; is_enabled?: boolean },
+): Promise<NotificationEmail> {
+  return apiFetch(`/org/${orgId}/notifications/emails/${emailId}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteNotificationEmail(orgId: string, emailId: string): Promise<{ message: string }> {
+  return apiFetch(`/org/${orgId}/notifications/emails/${emailId}`, { method: 'DELETE' });
+}
+
+export function listNotificationSettings(orgId: string): Promise<NotificationSetting[]> {
+  return apiFetch(`/org/${orgId}/notifications/settings`);
+}
+
+export function updateNotificationSetting(
+  orgId: string,
+  eventType: string,
+  patch: { min_role?: RoleGroup; is_enabled?: boolean },
+): Promise<NotificationSetting> {
+  return apiFetch(`/org/${orgId}/notifications/settings/${eventType}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function listNotificationLogs(
+  orgId: string,
+  params: { limit?: number; event_type?: string | null; status?: string | null;
+            from_date?: string | null; to_date?: string | null } = {},
+): Promise<NotificationLogEntry[]> {
+  return apiFetch(`/org/${orgId}/notifications/logs${qs({ ...params })}`);
+}

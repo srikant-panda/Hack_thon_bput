@@ -452,6 +452,15 @@ async def run_tests():
 
     await run_org_mail_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 20. ORG-4 — Email Notification Groups (role-grouped recipients, event
+    #     routing, triggers, delivery logs)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 20] ORG-4 — Email Notification Groups")
+    from test_org_notifications import run_org_notification_tests
+
+    await run_org_notification_tests(runner)
+
     return runner.report()
 
 

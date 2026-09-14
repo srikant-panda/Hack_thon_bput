@@ -65,6 +65,13 @@ const MODULES = [
     enabled: true,
   },
   {
+    to: '../notifications',
+    label: 'Email Groups',
+    description: 'Role-grouped notification lists and per-event-type email routing.',
+    icon: BellRing,
+    enabled: true,
+  },
+  {
     to: '../account-takeover',
     label: 'Account Takeover',
     description: 'Coming soon.',

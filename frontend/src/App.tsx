@@ -15,6 +15,8 @@ import OrgAccountTakeover from './pages/OrgAccountTakeover';
 import OrgMailServers from './pages/OrgMailServers';
 import OrgMailServerLogs from './pages/OrgMailServerLogs';
 import OrgMailServerSettings from './pages/OrgMailServerSettings';
+import OrgNotifications from './pages/OrgNotifications';
+import OrgNotificationLog from './pages/OrgNotificationLog';
 import AdminUsers from './pages/AdminUsers';
 import ComingSoon from './pages/ComingSoon';
 import EmailConnectors from './pages/EmailConnectors';
@@ -152,6 +154,9 @@ export default function App() {
           <Route path="/org/:orgId/mail-servers" element={<OrgMailServers />} />
           <Route path="/org/:orgId/mail-servers/:serverId/logs" element={<OrgMailServerLogs />} />
           <Route path="/org/:orgId/mail-servers/:serverId/settings" element={<OrgMailServerSettings />} />
+          {/* ORG-4: email notification groups */}
+          <Route path="/org/:orgId/notifications" element={<OrgNotifications />} />
+          <Route path="/org/:orgId/notifications/logs" element={<OrgNotificationLog />} />
         </Route>
         <Route path="/" element={<Landing />} />
         <Route path="*" element={<Navigate to="/" replace />} />

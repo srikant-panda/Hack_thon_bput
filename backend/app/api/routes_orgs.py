@@ -525,6 +525,24 @@ async def _gateway_scan_email(db: AsyncSession, org: Organization, data: dict[st
         system_prompt=PHISHING_SYSTEM_PROMPT,
         user_prompt_builder=format_phishing_user_prompt,
     )
+    # ORG-4 trigger: impersonation-type indicators page the impersonation group.
+    from app.services.org_notification_service import (
+        IMPERSONATION_INDICATOR_TYPES,
+        impersonation_email,
+        send_event,
+    )
+    impersonation_hits = [i for i in indicators if str(i.get("type")) in IMPERSONATION_INDICATOR_TYPES]
+    if impersonation_hits:
+        n_subject, n_body = impersonation_email(impersonation_hits, data.get("sender"))
+        await send_event(
+            db,
+            organization_id=org.id,
+            event_type="impersonation",
+            subject=n_subject,
+            body_html=n_body,
+            event_metadata={"alert_id": alert.id, "sender": data.get("sender"),
+                            "indicators": [i.get("type") for i in impersonation_hits]},
+        )
     return AlertResponse.model_validate(alert).model_dump(mode="json")
 
 

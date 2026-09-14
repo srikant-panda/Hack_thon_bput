@@ -170,6 +170,76 @@ class OrgLogEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
 
+class OrgNotificationEmail(Base):
+    """Registered notification recipient for an organization (ORG-4).
+
+    Org-level: independent of the per-user ``notification_email`` (Phase 7).
+    Multiple addresses can be registered and grouped by role; an event's
+    ``min_role`` decides which groups receive it.
+    """
+
+    __tablename__ = "org_notification_emails"
+    __table_args__ = (UniqueConstraint("organization_id", "email", name="uq_org_notification_email"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    # admin | analyst | viewer — the ROLE GROUP this address belongs to
+    role: Mapped[str] = mapped_column(String(16), default="analyst")
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+
+
+class OrgNotificationSetting(Base):
+    """Per-event-type notification routing (ORG-4).
+
+    ``min_role`` is the MINIMUM role group that receives this event type:
+    admin = only admins; analyst = analysts + admins; viewer = everyone.
+    """
+
+    __tablename__ = "org_notification_settings"
+    __table_args__ = (UniqueConstraint("organization_id", "event_type", name="uq_org_notification_setting"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # server_down | mail_server_down | critical_log | impersonation
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    min_role: Mapped[str] = mapped_column(String(16), default="analyst")
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+
+class OrgNotificationLog(Base):
+    """Delivery log for org notification events (ORG-4).
+
+    ``recipients`` records the per-address outcome:
+    ``[{"email", "role", "status", "error_detail"}]``. Delivery reuses the
+    Phase 7 backend (db_log by default, optional best-effort SMTP).
+    """
+
+    __tablename__ = "org_notification_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
+    recipients: Mapped[list[dict[str, Any]]] = mapped_column(PortableJSON, default=list)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    body_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    event_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(PortableJSON, nullable=True)
+    # sent | failed | skipped
+    status: Mapped[str] = mapped_column(String(16), default="sent", index=True)
+    error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+
+
 class OrgMailServer(Base):
     """Org-level mail server connector (ORG-3) — server-to-server
     infrastructure, NOT the personal OAuth mailbox connector (Phase 2).
