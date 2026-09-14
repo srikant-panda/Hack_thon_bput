@@ -162,8 +162,8 @@ def run_ml_gate_tests(runner: TestRunner) -> None:
         f"malicious={malicious[1]} benign={benign[1]}",
     )
     runner.assert_true(
-        ml.url_model_version() == "v2",
-        "URL model version resolves to v2",
+        ml.url_model_version() == "v3.1",
+        "URL model version resolves to v3.1 (shipped reputation-aware model)",
         f"got {ml.url_model_version()}",
     )
 

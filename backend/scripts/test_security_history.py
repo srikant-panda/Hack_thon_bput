@@ -28,7 +28,8 @@ from app.core.config import get_settings  # noqa: E402
 from app.core.crypto import encrypt_secret  # noqa: E402
 from app.core.security import get_current_user  # noqa: E402
 from app.db.models import AuditLog, BlockedSender, EmailConnectorAccount, QuarantinedItem, SecurityEvent  # noqa: E402
-from app.db.session import async_session_maker  # noqa: E402
+from app.db.session import async_session_maker, current_user_id  # noqa: E402
+from _rls import as_user, create_user_admin  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas.email import NormalizedMessage  # noqa: E402
 from app.services.email_providers.gmail import gmail_provider  # noqa: E402
@@ -112,8 +113,9 @@ async def run_security_history_tests(runner: TestRunner) -> None:
 
     user_a_id = f"hist-a-{uuid.uuid4().hex[:8]}"
     connector_a_id = f"hist-conn-a-{uuid.uuid4().hex[:6]}"
+    await create_user_admin(id=user_a_id, email=f"{user_a_id}@gmail.com", is_single_user=True)
 
-    async with async_session_maker() as db:
+    async with as_user(user_a_id), async_session_maker() as db:
         db.add(
             EmailConnectorAccount(
                 id=connector_a_id,
@@ -139,6 +141,7 @@ async def run_security_history_tests(runner: TestRunner) -> None:
 
     def _override(uid):
         async def _fn():
+            current_user_id.set(uid)  # RLS identity, as in production
             return _user(uid)
 
         return _fn
@@ -169,7 +172,7 @@ async def run_security_history_tests(runner: TestRunner) -> None:
             res = await client.post(f"/api/v1/connectors/{connector_a_id}/scan", json={"scan_recent": 1})
             runner.assert_true(res.status_code == 200, "Scan returns 200", f"status={res.status_code}")
 
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             event = (
                 await db.execute(
                     select(SecurityEvent).where(
@@ -194,13 +197,13 @@ async def run_security_history_tests(runner: TestRunner) -> None:
         print("\n[Suite 15.2] Enforcement + scheduler event chain")
         message = _bad_message(f"hist-enf-{uuid.uuid4().hex[:6]}")
         scan = await scan_message(message)
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             connector = (
                 await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_a_id))
             ).scalar_one()
             await enforce_scan_result(db, connector, message, scan)
 
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             q_event = (
                 await db.execute(
                     select(SecurityEvent).where(
@@ -226,7 +229,7 @@ async def run_security_history_tests(runner: TestRunner) -> None:
                                "sender_block event recorded with the Gmail filter id in detail")
 
         # Manual release via the API (actor user).
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             item = (
                 await db.execute(
                     select(QuarantinedItem).where(
@@ -241,7 +244,7 @@ async def run_security_history_tests(runner: TestRunner) -> None:
             res = await client.post(f"/api/v1/enforcement/quarantine/{item.id}/release")
             runner.assert_true(res.status_code == 200, "Manual release returns 200")
 
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             r_event = (
                 await db.execute(
                     select(SecurityEvent).where(
@@ -255,7 +258,7 @@ async def run_security_history_tests(runner: TestRunner) -> None:
             runner.assert_true(r_event is not None, "release event recorded with actor=user")
 
         # Scheduler expiry: force the sender block expired and run one pass.
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             block = (
                 await db.execute(
                     select(BlockedSender).where(
@@ -269,7 +272,7 @@ async def run_security_history_tests(runner: TestRunner) -> None:
 
         stats = await run_expiry_once()
         runner.assert_true(stats["blocks_expired"] >= 1, "Scheduler expired the block", str(stats))
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             se_event = (
                 await db.execute(
                     select(SecurityEvent).where(
@@ -345,7 +348,7 @@ async def run_security_history_tests(runner: TestRunner) -> None:
         # 5. audit_logs.actor_type per path
         # --------------------------------------------------------------
         print("\n[Suite 15.5] audit actor_type distinction")
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             sys_rows = (await db.execute(
                 select(func.count()).select_from(AuditLog).where(
                     AuditLog.owner_user_id == user_a_id, AuditLog.actor_type == "system")
@@ -369,10 +372,10 @@ async def run_security_history_tests(runner: TestRunner) -> None:
         from scripts.backfill_security_history import backfill
 
         counts1 = await backfill()
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             n1 = (await db.execute(select(func.count()).select_from(SecurityEvent))).scalar()
         counts2 = await backfill()
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             n2 = (await db.execute(select(func.count()).select_from(SecurityEvent))).scalar()
         runner.assert_true(n1 == n2, f"Second backfill run adds no duplicates ({n1} -> {n2})", f"{counts1} vs {counts2}")
         runner.assert_true(counts2["quarantine"] == 0 and counts2["sender_block"] == 0,

@@ -28,7 +28,8 @@ from app.core.config import get_settings  # noqa: E402
 from app.core.crypto import encrypt_secret  # noqa: E402
 from app.core.security import get_current_user  # noqa: E402
 from app.db.models import BlockedSender, EmailConnectorAccount, NotificationLog, QuarantinedItem, User  # noqa: E402
-from app.db.session import async_session_maker  # noqa: E402
+from app.db.session import async_session_maker, current_user_id  # noqa: E402
+from _rls import as_user, create_user_admin  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas.email import NormalizedMessage  # noqa: E402
 from app.services.email_providers import get_provider  # noqa: E402
@@ -162,10 +163,10 @@ async def run_phase_6_7_tests(runner: TestRunner) -> None:
     conn_a_id = f"p67-conn-a-{uuid.uuid4().hex[:6]}"
     conn_norules_id = f"p67-conn-nr-{uuid.uuid4().hex[:6]}"
 
-    async with async_session_maker() as db:
-        db.add(User(id=user_a_id, email=f"{user_a_id}@t.local", is_single_user=True,
-                    notification_email="owner-alerts@registered.test"))
-        db.add(User(id=user_b_id, email=f"{user_b_id}@t.local", is_single_user=True))
+    await create_user_admin(id=user_a_id, email=f"{user_a_id}@t.local", is_single_user=True,
+                            notification_email="owner-alerts@registered.test")
+    await create_user_admin(id=user_b_id, email=f"{user_b_id}@t.local", is_single_user=True)
+    async with as_user(user_a_id), async_session_maker() as db:
         db.add(EmailConnectorAccount(
             id=conn_a_id, owner_user_id=user_a_id, provider="mock",
             provider_email=f"{user_a_id}@mock.test", status="connected",
@@ -198,7 +199,7 @@ async def run_phase_6_7_tests(runner: TestRunner) -> None:
 
     message = _bad_message("m-enf-1")
     scan = await scan_message(message)
-    async with async_session_maker() as db:
+    async with as_user(user_a_id), async_session_maker() as db:
         connector = (
             await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == conn_a_id))
         ).scalar_one()
@@ -221,7 +222,7 @@ async def run_phase_6_7_tests(runner: TestRunner) -> None:
     action_engine.get_provider = _factory_for(norules_mock)
     message2 = _bad_message("m-enf-2")
     scan2 = await scan_message(message2)
-    async with async_session_maker() as db:
+    async with as_user(user_a_id), async_session_maker() as db:
         connector_nr = (
             await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == conn_norules_id))
         ).scalar_one()
@@ -233,7 +234,7 @@ async def run_phase_6_7_tests(runner: TestRunner) -> None:
         not any(c[0] == "create_sender_rule" for c in norules_mock.calls),
         "Engine skips sender rules when capabilities say unsupported",
     )
-    async with async_session_maker() as db:
+    async with as_user(user_a_id), async_session_maker() as db:
         nr_blocks = (
             await db.execute(select(func.count()).select_from(BlockedSender).where(
                 BlockedSender.connector_id == conn_norules_id))
@@ -246,7 +247,7 @@ async def run_phase_6_7_tests(runner: TestRunner) -> None:
     # --------------------------------------------------------------
     print("\n[Suite 16.3] Notification trigger + recipient boundary")
     # The engine's quarantine event (above) should have notified the owner.
-    async with async_session_maker() as db:
+    async with as_user(user_a_id), async_session_maker() as db:
         logs = (
             await db.execute(select(NotificationLog).where(NotificationLog.owner_user_id == user_a_id))
         ).scalars().all()
@@ -270,6 +271,7 @@ async def run_phase_6_7_tests(runner: TestRunner) -> None:
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     def _override(uid, notif=None):
         async def _fn():
+            current_user_id.set(uid)  # RLS identity, as in production
             return _user(uid, notif)
 
         return _fn

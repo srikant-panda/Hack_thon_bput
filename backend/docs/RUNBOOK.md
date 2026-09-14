@@ -14,7 +14,7 @@ There are **two database roles** and **three layers of schema creation**:
 | Layer | Role | What it does |
 |---|---|---|
 | App runtime (`uvicorn`) | `cyberguard_api` (NOBYPASSRLS, no CREATE priv) | `init_db()` → best-effort `CREATE SCHEMA IF NOT EXISTS cyberguard` (skipped silently if the role lacks CREATE), then `create_all()` from ORM metadata + seeds the response catalog |
-| Migrations (`alembic`) | `postgres` (MIGRATION_DATABASE_URL) | `env.py` ensures the schema exists, then `0001_cyberguard_baseline` creates **all 24 tables from the live ORM metadata**, installs roles, **RLS + 92 owner-scoped policies**, and grants |
+| Migrations (`alembic`) | `postgres` (MIGRATION_DATABASE_URL) | `env.py` ensures the schema exists, then `0001_cyberguard_baseline` creates **all tables from the live ORM metadata** (baseline + `0008_org_foundation`), installs roles, **RLS policies**, and grants |
 | Google Supabase | — | Auth (JWTs), storage. The Postgres DB itself is a plain Postgres database |
 
 **Rule of thumb:** the app can heal *tables* by itself; only alembic can heal
@@ -65,7 +65,7 @@ cd backend
 uv sync                        # create .venv from uv.lock
 cp .env.example .env           # then fill in DATABASE_URL / MIGRATION_DATABASE_URL /
                                # SUPABASE_* / GOOGLE_GMAIL_* / LLM keys
-uv run alembic upgrade head    # schema + 24 tables + RLS + grants + roles
+uv run alembic upgrade head    # schema + all tables (incl. 0008 org tables) + RLS + grants + roles
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 cd ../frontend
@@ -94,7 +94,7 @@ uv run alembic upgrade head
 That's it. The baseline migration is error-tolerant and idempotent:
 
 1. `CREATE SCHEMA IF NOT EXISTS "cyberguard"` — schema recreated automatically.
-2. All 24 tables created from the live SQLAlchemy models (`checkfirst=True`,
+2. All tables created from the live SQLAlchemy models (`checkfirst=True`,
    so partially-existing tables never fail).
 3. Roles `cyberguard_api` / `authenticated` created only when missing.
 4. RLS enabled on all tables + owner-scoped policies keyed on `app.user_id`.
@@ -116,8 +116,8 @@ Then restart the backend (section 1).
 ## 4. Full reset from scratch (delete everything, rebuild)
 
 **Destroys all data.** Use the dedicated drop script
-(`backend/scripts/drop_cyberguard_schema.py`) — it deletes all 92 RLS
-policies, all 24 tables, the schema itself, and the migration bookkeeping,
+(`backend/scripts/drop_cyberguard_schema.py`) — it deletes all RLS
+policies, all tables, the schema itself, and the migration bookkeeping,
 with a dry-run plan, role-ownership guards and a typed confirmation:
 
 ```bash
@@ -131,7 +131,7 @@ uv run alembic upgrade head
 ```
 
 Expected result: `alembic current` → `0001_cyberguard_baseline (head)`;
-24 tables in `cyberguard`, all with `rowsecurity = true`, 92 policies.
+26 tables in `cyberguard` (24 baseline + 2 ORG-1 org tables), all with `rowsecurity = true`, 96 policies (as of migration `0008_org_foundation`).
 
 Safety behaviour of the drop script:
 

@@ -28,7 +28,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.security import CurrentUser, TenantContext, get_current_user, get_tenant_context
 from app.db.models import Organization, OrganizationMember, User
-from app.db.session import async_session_maker, init_db
+from app.db.session import async_session_maker, current_user_id, init_db
 from app.main import app
 
 
@@ -90,7 +90,10 @@ async def run_tests():
     test_user = CurrentUser(id=test_user_id, email=test_email, full_name="Test SOC Analyst")
     personal_org_id = f"org-personal-{os.urandom(8).hex()}"  # <= varchar(36) — Postgres enforces the column length
 
-    # Provision user and personal org in a dedicated, isolated session
+    # Provision user and personal org in a dedicated, isolated session.
+    # Production parity: the real get_current_user stamps the RLS identity
+    # (app.user_id GUC) before any SQL runs; the baseline RLS enforces it.
+    current_user_id.set(test_user.id)
     async with async_session_maker() as db:
         user_db = User(id=test_user.id, email=test_user.email, full_name=test_user.full_name)
         db.add(user_db)
@@ -115,8 +118,10 @@ async def run_tests():
         await db.commit()
 
     active_org_id = personal_org_id
+    current_user_id.set(None)  # reset after direct-session provisioning
 
     async def mock_get_current_user():
+        current_user_id.set(test_user.id)  # RLS identity, as in production
         return test_user
 
     async def mock_get_tenant_context():
@@ -127,6 +132,7 @@ async def run_tests():
             role="admin",
             is_single_user=(active_org_id == personal_org_id),
             user_id=test_user.id,
+            owner_user_id=test_user.id,  # rows must satisfy owner-scoped RLS
         )
 
     app.dependency_overrides[get_current_user] = mock_get_current_user
@@ -317,6 +323,7 @@ async def run_tests():
 
     # Clean up overrides
     app.dependency_overrides.clear()
+    current_user_id.set(None)
 
     # Restore the frozen-orgs flag for the remaining suites (product default).
     get_settings().ORG_ENABLED = _org_enabled_backup
@@ -418,6 +425,14 @@ async def run_tests():
     from test_phase_6_7 import run_phase_6_7_tests
 
     await run_phase_6_7_tests(runner)
+
+    # -----------------------------------------------------------------------
+    # 17. ORG-1 — Organization Foundation (salting, API keys, gateway, RBAC, RLS)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 17] ORG-1 — Organization Foundation")
+    from test_org_foundation import run_org_foundation_tests
+
+    await run_org_foundation_tests(runner)
 
     return runner.report()
 

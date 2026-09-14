@@ -27,6 +27,8 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from app.core.security import get_current_user  # noqa: E402
+from app.db.session import current_user_id  # noqa: E402
+from _rls import as_user, create_user_admin  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -235,7 +237,10 @@ async def run_mail_scanner_tests(runner: TestRunner) -> None:
 
     from app.core.crypto import encrypt_secret
 
-    async with async_session_maker() as db:
+    await create_user_admin(id=user_a_id, email=f"{user_a_id}@gmail.com", is_single_user=True)
+    await create_user_admin(id=user_b_id, email=f"{user_b_id}@gmail.com", is_single_user=True)
+
+    async with as_user(user_a_id), async_session_maker() as db:
         db.add(
             EmailConnectorAccount(
                 id=conn_a_id,
@@ -248,6 +253,9 @@ async def run_mail_scanner_tests(runner: TestRunner) -> None:
                 access_token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
             )
         )
+        await db.commit()
+
+    async with as_user(user_b_id), async_session_maker() as db:
         db.add(
             EmailConnectorAccount(
                 id=conn_b_id,
@@ -296,6 +304,7 @@ async def run_mail_scanner_tests(runner: TestRunner) -> None:
     try:
         def _override(uid):
             async def _fn():
+                current_user_id.set(uid)  # RLS identity, as in production
                 return _user(uid)
 
             return _fn

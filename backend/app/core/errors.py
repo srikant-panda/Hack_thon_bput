@@ -35,6 +35,11 @@ class NotFoundError(AppError):
         super().__init__(message, code="not_found", status_code=status.HTTP_404_NOT_FOUND)
 
 
+class UnauthorizedError(AppError):
+    def __init__(self, message: str = "Missing or invalid credentials"):
+        super().__init__(message, code="unauthorized", status_code=status.HTTP_401_UNAUTHORIZED)
+
+
 class PermissionDeniedError(AppError):
     def __init__(self, message: str = "You do not have permission to perform this action"):
         super().__init__(message, code="permission_denied", status_code=status.HTTP_403_FORBIDDEN)

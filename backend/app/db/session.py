@@ -169,10 +169,16 @@ DEFAULT_RESPONSE_CATALOG = [
 
 
 async def _seed_default_policies() -> None:
-    """Create one default "Balanced" enforcement policy per organization if none exists."""
+    """Create one default "Balanced" enforcement policy per organization if none exists.
+
+    Runs through the service role (admin session maker): startup seeding is a
+    system task with no user identity, so owner-scoped RLS on
+    enforcement_policies would reject the insert from the app role.
+    """
+    from app.db.admin import _get_admin_session_maker
     from app.db.models import EnforcementPolicy, Organization
 
-    async with async_session_maker() as session:
+    async with _get_admin_session_maker()() as session:
         result = await session.execute(select(Organization))
         orgs = result.scalars().all()
 

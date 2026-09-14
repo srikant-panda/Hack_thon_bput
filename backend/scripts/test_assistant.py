@@ -22,7 +22,7 @@ from sqlalchemy import select
 
 from app.core.security import CurrentUser, TenantContext, get_current_user, get_tenant_context
 from app.db.models import ActionExecution, Alert, AuditLog, EnforcementPolicy, Organization, OrganizationMember, User
-from app.db.session import async_session_maker, init_db
+from app.db.session import async_session_maker, current_user_id, init_db
 from app.main import app
 from app.services.assistant_service import REFUSAL_INTERNAL, REFUSAL_OUT_OF_SCOPE, classify_intent
 
@@ -72,6 +72,7 @@ async def run_assistant_tests(runner: TestRunner) -> None:
     org_b = f"org-asst-b-{suffix}"
     test_user = CurrentUser(id=user_id, email=f"asst-{suffix}@cyberguard.test", full_name="Assistant Analyst")
 
+    current_user_id.set(user_id)  # RLS identity for direct-session provisioning
     async with async_session_maker() as db:
         db.add(User(id=user_id, email=test_user.email, full_name=test_user.full_name))
         await db.flush()
@@ -85,19 +86,20 @@ async def run_assistant_tests(runner: TestRunner) -> None:
         critical_title = f"Critical ATO breach {suffix}"
         high_title = f"High phishing campaign {suffix}"
         low_title = f"Low URL hit {suffix}"
-        db.add(Alert(id=str(uuid.uuid4()), organization_id=org_a, title=critical_title,
+        db.add(Alert(id=str(uuid.uuid4()), organization_id=org_a, owner_user_id=user_id, title=critical_title,
                      module="account_takeover", severity="critical", risk_score=95,
                      mitre=[{"id": "T1078", "name": "Valid Accounts"}]))
-        db.add(Alert(id=str(uuid.uuid4()), organization_id=org_a, title=high_title,
+        db.add(Alert(id=str(uuid.uuid4()), organization_id=org_a, owner_user_id=user_id, title=high_title,
                      module="phishing", severity="high", risk_score=78,
                      mitre=[{"id": "T1566.002", "name": "Spearphishing Link"}]))
-        db.add(Alert(id=str(uuid.uuid4()), organization_id=org_a, title=low_title,
+        db.add(Alert(id=str(uuid.uuid4()), organization_id=org_a, owner_user_id=user_id, title=low_title,
                      module="url", severity="low", risk_score=15, mitre=[]))
         await db.commit()
 
     current_org = {"value": org_a}
 
     async def mock_get_current_user():
+        current_user_id.set(user_id)  # RLS identity, as in production
         return test_user
 
     async def mock_get_tenant_context():
@@ -107,6 +109,7 @@ async def run_assistant_tests(runner: TestRunner) -> None:
             role="admin",
             is_single_user=False,
             user_id=user_id,
+            owner_user_id=user_id,  # rows must satisfy owner-scoped RLS
         )
 
     app.dependency_overrides[get_current_user] = mock_get_current_user

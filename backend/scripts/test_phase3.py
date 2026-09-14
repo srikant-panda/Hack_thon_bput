@@ -31,7 +31,7 @@ from app.db.models import (
     OrganizationMember,
     User,
 )
-from app.db.session import async_session_maker, init_db
+from app.db.session import async_session_maker, current_user_id, init_db
 from app.main import app
 
 
@@ -65,6 +65,7 @@ class TestRunner:
 async def _make_execution(
     *,
     org_id: str,
+    owner_user_id: str = "",
     alert_id: Optional[str],
     action_type: str,
     status: str,
@@ -79,6 +80,7 @@ async def _make_execution(
         db.add(ActionExecution(
             id=exec_id,
             organization_id=org_id,
+            owner_user_id=owner_user_id or None,
             alert_id=alert_id,
             action_type=action_type,
             target={"email_id": "eml-x", "recipient": "victim@corp.test", "url": "http://evil.test"},
@@ -98,12 +100,13 @@ async def _make_execution(
     return exec_id
 
 
-async def _make_alert(*, org_id: str, module: str = "phishing") -> str:
+async def _make_alert(*, org_id: str, owner_user_id: str = "", module: str = "phishing") -> str:
     alert_id = str(uuid.uuid4())
     async with async_session_maker() as db:
         db.add(Alert(
             id=alert_id,
             organization_id=org_id,
+            owner_user_id=owner_user_id or None,
             title="Phase Three fixture alert",
             module=module,
             severity="high",
@@ -123,6 +126,7 @@ async def run_phase3_tests(runner: TestRunner) -> None:
     org_id = f"org-p3-{suffix}"
     test_user = CurrentUser(id=user_id, email=f"p3-{suffix}@cyberguard.test", full_name="Phase Three Admin")
 
+    current_user_id.set(user_id)  # RLS identity for direct-session provisioning
     async with async_session_maker() as db:
         db.add(User(id=user_id, email=test_user.email, full_name=test_user.full_name))
         await db.flush()
@@ -149,6 +153,7 @@ async def run_phase3_tests(runner: TestRunner) -> None:
     current_role = {"value": "admin"}
 
     async def mock_get_current_user():
+        current_user_id.set(user_id)  # RLS identity, as in production
         return test_user
 
     async def mock_get_tenant_context():
@@ -158,6 +163,7 @@ async def run_phase3_tests(runner: TestRunner) -> None:
             role=current_role["value"],
             is_single_user=False,
             user_id=test_user.id,
+            owner_user_id=user_id,  # rows must satisfy owner-scoped RLS
         )
 
     app.dependency_overrides[get_current_user] = mock_get_current_user
@@ -166,26 +172,26 @@ async def run_phase3_tests(runner: TestRunner) -> None:
     # -----------------------------------------------------------------------
     # Fixtures: a mix of executions with different statuses/modules
     # -----------------------------------------------------------------------
-    alert_id = await _make_alert(org_id=org_id)
+    alert_id = await _make_alert(org_id=org_id, owner_user_id=user_id)
     exec_pending = await _make_execution(
-        org_id=org_id, alert_id=alert_id, action_type="quarantine_email",
+        org_id=org_id, owner_user_id=user_id, alert_id=alert_id, action_type="quarantine_email",
         status="pending", requires_approval=True,
     )
     exec_pending_2 = await _make_execution(
-        org_id=org_id, alert_id=alert_id, action_type="block_url",
+        org_id=org_id, owner_user_id=user_id, alert_id=alert_id, action_type="block_url",
         status="pending", module="url", requires_approval=True,
     )
     exec_quarantined = await _make_execution(
-        org_id=org_id, alert_id=alert_id, action_type="quarantine_email", status="success",
+        org_id=org_id, owner_user_id=user_id, alert_id=alert_id, action_type="quarantine_email", status="success",
     )
     exec_blocked = await _make_execution(
-        org_id=org_id, alert_id=alert_id, action_type="block_url", status="success", module="url",
+        org_id=org_id, owner_user_id=user_id, alert_id=alert_id, action_type="block_url", status="success", module="url",
     )
     exec_rejected = await _make_execution(
-        org_id=org_id, alert_id=alert_id, action_type="rate_limit", status="rejected", module="network",
+        org_id=org_id, owner_user_id=user_id, alert_id=alert_id, action_type="rate_limit", status="rejected", module="network",
     )
     exec_skipped = await _make_execution(
-        org_id=org_id, alert_id=alert_id, action_type="block", status="skipped",
+        org_id=org_id, owner_user_id=user_id, alert_id=alert_id, action_type="block", status="skipped",
     )
     # A second org's record — must never leak into listings
     # (create the org row first: Postgres enforces the FK, SQLite did not)
@@ -196,7 +202,8 @@ async def run_phase3_tests(runner: TestRunner) -> None:
         ))
         await db.commit()
     other_exec = await _make_execution(
-        org_id=f"org-other-{suffix}", alert_id=None, action_type="quarantine_email", status="success",
+        org_id=f"org-other-{suffix}", owner_user_id=user_id, alert_id=None,
+        action_type="quarantine_email", status="success",
     )
 
     transport = ASGITransport(app=app)
@@ -385,7 +392,7 @@ async def run_phase3_tests(runner: TestRunner) -> None:
             # Analyst: approve OK, policy mutation 403
             current_role["value"] = "analyst"
             exec_pending_3 = await _make_execution(
-                org_id=org_id, alert_id=alert_id, action_type="block_url",
+                org_id=org_id, owner_user_id=user_id, alert_id=alert_id, action_type="block_url",
                 status="pending", module="url", requires_approval=True,
             )
             res = await client.post(f"/api/v1/actions/{exec_pending_3}/approve", json={})
@@ -436,6 +443,7 @@ async def run_phase3_tests(runner: TestRunner) -> None:
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         app.dependency_overrides.pop(get_tenant_context, None)
+        current_user_id.set(None)
 
 
 async def _standalone() -> int:

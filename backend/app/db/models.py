@@ -62,10 +62,15 @@ class Organization(Base):
     __tablename__ = "organizations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    # Salted unique name ("Acme Corp-2"); ``display_name`` keeps the original.
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     slug: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     is_personal: Mapped[bool] = mapped_column(Boolean, default=False)  # True for single-user workspaces
+    # Org creator (superuser/admin); also the RLS owner anchor for org rows.
     owner_id: Mapped[str] = mapped_column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # active | suspended
+    status: Mapped[str] = mapped_column(String(16), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
     # Relationships
@@ -109,6 +114,52 @@ class OrganizationMember(Base):
     # Relationships
     organization: Mapped["Organization"] = relationship("Organization", back_populates="members")
     user: Mapped["User"] = relationship("User", back_populates="memberships")
+
+
+class OrganizationAPIKey(Base):
+    """Server-to-server API key for the org-scoped gateway (ORG-1).
+
+    Only the SHA-256 hash is stored; the plaintext key is returned exactly
+    once by the create endpoint and never persisted. ``key_prefix`` (first 16
+    chars) is kept for display/identification in the settings UI.
+    """
+
+    __tablename__ = "organization_api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)  # "Production Key", "Staging Key"
+    key_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(32), nullable=False)  # "cg_live_abc12345"
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # NULL = never
+    # active | revoked
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+
+
+class OrganizationSetting(Base):
+    """Org-level key/value preferences (ORG-1).
+
+    Keys named in ``app.core.permissions.SENSITIVE_SETTING_KEYS`` (e.g.
+    ``api_keys``, ``billing``) are hidden from viewers at both the API and
+    the RLS layer.
+    """
+
+    __tablename__ = "organization_settings"
+    __table_args__ = (UniqueConstraint("organization_id", "key", name="uq_org_setting"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
 
 
 class Event(Base):

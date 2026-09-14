@@ -6,6 +6,9 @@ import Landing from './pages/Landing';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import OrganizationManagement from './pages/OrganizationManagement';
+import OrganizationCreate from './pages/OrganizationCreate';
+import OrganizationSettings from './pages/OrganizationSettings';
+import OrganizationDashboard from './pages/OrganizationDashboard';
 import AdminUsers from './pages/AdminUsers';
 import ComingSoon from './pages/ComingSoon';
 import EmailConnectors from './pages/EmailConnectors';
@@ -131,6 +134,10 @@ export default function App() {
           <Route path="/audit-logs" element={<WorkspaceGuard path="/audit-logs"><AuditLogs /></WorkspaceGuard>} />
           <Route path="/reports" element={<WorkspaceGuard path="/reports"><Reports /></WorkspaceGuard>} />
           <Route path="/settings" element={<Settings />} />
+          {/* ORG-1 foundation: always-on org endpoints (backend /orgs router) */}
+          <Route path="/org/create" element={<OrganizationCreate />} />
+          <Route path="/org/:orgId/settings" element={<OrganizationSettings />} />
+          <Route path="/org/:orgId/dashboard" element={<OrganizationDashboard />} />
         </Route>
         <Route path="/" element={<Landing />} />
         <Route path="*" element={<Navigate to="/" replace />} />

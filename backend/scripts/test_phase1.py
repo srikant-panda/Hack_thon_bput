@@ -24,7 +24,13 @@ from app.core.mode_detector import (
     resolve_mode,
 )
 from app.db.models import ActionExecution, Alert, EnforcementPolicy, Organization, User
-from app.db.session import _seed_default_policies, async_session_maker, engine, init_db
+from app.db.session import (
+    _seed_default_policies,
+    async_session_maker,
+    current_user_id,
+    engine,
+    init_db,
+)
 from app.services.enforcement_engine import enforcement_engine
 
 
@@ -65,7 +71,11 @@ async def run_phase1_tests(runner: TestRunner) -> None:
     try:
         await init_db()
         async with engine.connect() as conn:
-            table_names = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+            # PG keeps all tables in the dedicated "cyberguard" schema.
+            _schema = "cyberguard" if engine.dialect.name == "postgresql" else None
+            table_names = await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).get_table_names(schema=_schema)
+            )
         runner.assert_true(
             "enforcement_policies" in table_names,
             "enforcement_policies table created after init_db()",
@@ -117,22 +127,28 @@ async def run_phase1_tests(runner: TestRunner) -> None:
     # -----------------------------------------------------------------------
     print("\n[Phase 1.3] Default Policy Seeding")
     suffix = os.urandom(4).hex()
+    p1_user = f"usr-p1-{suffix}"
+    p1_org = f"org-p1-{suffix}"
+    # RLS parity: set the identity GUC for direct-session provisioning.
+    current_user_id.set(p1_user)
     async with async_session_maker() as db:
-        db.add(User(id=f"usr-p1-{suffix}", email=f"phase1-{suffix}@cyberguard.test", full_name="Phase One"))
+        db.add(User(id=p1_user, email=f"phase1-{suffix}@cyberguard.test", full_name="Phase One"))
         await db.flush()
         db.add(Organization(
-            id=f"org-p1-{suffix}",
+            id=p1_org,
             name="Phase One Test Org",
             slug=f"phase1-{suffix}",
             is_personal=False,
-            owner_id=f"usr-p1-{suffix}",
+            owner_id=p1_user,
         ))
         await db.commit()
+    current_user_id.set(None)
 
     await _seed_default_policies()
+    current_user_id.set(p1_user)  # org owner reads its policy
     async with async_session_maker() as db:
         policies = (await db.execute(
-            select(EnforcementPolicy).where(EnforcementPolicy.organization_id == f"org-p1-{suffix}")
+            select(EnforcementPolicy).where(EnforcementPolicy.organization_id == p1_org)
         )).scalars().all()
         runner.assert_true(
             len(policies) == 1 and policies[0].is_active and policies[0].name == "Balanced (default)",
@@ -158,10 +174,12 @@ async def run_phase1_tests(runner: TestRunner) -> None:
     # so mapped_column defaults are applied by the ORM at flush time)
     # -----------------------------------------------------------------------
     print("\n[Phase 1.4] Enforcement Decision Engine")
+    # Org policies are inserted/updated by the org admin (RLS org-admin branch).
+    current_user_id.set(p1_user)
     async with async_session_maker() as db:
-        balanced = EnforcementPolicy(organization_id=f"org-p1-{suffix}", name="Balanced (test)")
+        balanced = EnforcementPolicy(organization_id=p1_org, name="Balanced (test)")
         strict_network = EnforcementPolicy(
-            organization_id=f"org-p1-{suffix}",
+            organization_id=p1_org,
             name="Strict network (test)",
             network_high_threshold=90,
         )
@@ -220,10 +238,12 @@ async def run_phase1_tests(runner: TestRunner) -> None:
     # 9. ActionExecution persistence round-trip
     # -----------------------------------------------------------------------
     print("\n[Phase 1.5] ActionExecution Persistence")
+    current_user_id.set(p1_user)  # rows are owner-scoped to the org creator
     async with async_session_maker() as db:
         db.add(Alert(
             id=f"alert-p1-rt-{suffix}",
-            organization_id=f"org-p1-{suffix}",
+            organization_id=p1_org,
+            owner_user_id=p1_user,
             title="Phase One round-trip alert",
             module="phishing",
             severity="high",
@@ -232,7 +252,8 @@ async def run_phase1_tests(runner: TestRunner) -> None:
         await db.flush()
         db.add(ActionExecution(
             id=f"exec-p1-{suffix}",
-            organization_id=f"org-p1-{suffix}",
+            organization_id=p1_org,
+            owner_user_id=p1_user,
             alert_id=f"alert-p1-rt-{suffix}",
             action_type="block",
             target={"email_id": f"eml-{suffix}", "recipient": "victim@corp.test"},
@@ -258,6 +279,8 @@ async def run_phase1_tests(runner: TestRunner) -> None:
             runner.assert_true(fetched.target["recipient"] == "victim@corp.test", "JSON target round-trips")
             runner.assert_true(fetched.approved_by is None and fetched.executed_at is None, "Approval fields start empty")
             runner.assert_true(fetched.policy_id == default_policy.id, "Policy FK links to seeded policy")
+
+    current_user_id.set(None)  # don't leak the test identity into later suites
 
 
 async def _standalone() -> int:

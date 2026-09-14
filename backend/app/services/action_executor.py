@@ -112,6 +112,7 @@ class ActionExecutor:
         execution = ActionExecution(
             id=str(uuid.uuid4()),
             organization_id=organization_id or alert.organization_id,
+            owner_user_id=alert.owner_user_id,  # inherit tenant owner (RLS)
             alert_id=alert.id,
             event_id=event_id or alert.event_id,
             action_type=action_type,

@@ -21,7 +21,7 @@ from sqlalchemy import select
 
 from app.core.security import CurrentUser, TenantContext, get_current_user, get_tenant_context
 from app.db.models import ActionExecution, Organization, OrganizationMember, User
-from app.db.session import async_session_maker, init_db
+from app.db.session import async_session_maker, current_user_id, init_db
 from app.main import app
 
 
@@ -90,6 +90,7 @@ async def run_phase2_tests(runner: TestRunner) -> None:
     org_id = f"org-p2-{suffix}"
     test_user = CurrentUser(id=user_id, email=f"p2-{suffix}@cyberguard.test", full_name="Phase Two Analyst")
 
+    current_user_id.set(user_id)  # RLS identity for direct-session provisioning
     async with async_session_maker() as db:
         db.add(User(id=user_id, email=test_user.email, full_name=test_user.full_name))
         await db.flush()
@@ -111,6 +112,7 @@ async def run_phase2_tests(runner: TestRunner) -> None:
         await db.commit()
 
     async def mock_get_current_user():
+        current_user_id.set(user_id)  # RLS identity, as in production
         return test_user
 
     async def mock_get_tenant_context():
@@ -120,6 +122,7 @@ async def run_phase2_tests(runner: TestRunner) -> None:
             role="admin",
             is_single_user=False,
             user_id=user_id,
+            owner_user_id=user_id,  # rows must satisfy owner-scoped RLS
         )
 
     app.dependency_overrides[get_current_user] = mock_get_current_user

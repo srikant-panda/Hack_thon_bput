@@ -28,6 +28,10 @@ if ROOT not in sys.path:
 from app.core.security import TenantContext, get_current_user, get_tenant_context, tenant_criteria  # noqa: E402
 from app.db.models import Alert, User  # noqa: E402
 from app.db.session import async_session_maker  # noqa: E402
+from functools import partial  # noqa: E402
+
+from _rls import as_user, create_user_admin  # noqa: E402
+from app.db.session import current_user_id  # noqa: E402
 from app.main import app  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -109,6 +113,11 @@ def _install_fake_supabase() -> None:
 
 
 def _personal_tenant(user_id: str, email: str | None = None) -> TenantContext:
+    # Overriding get_tenant_context bypasses the get_current_user subtree, so
+    # the RLS identity must be stamped here. NOTE: must be invoked from an
+    # async override — sync dependencies run in a worker thread whose context
+    # copy would not propagate the ContextVar to the handler.
+    current_user_id.set(user_id)
     return TenantContext(
         user_id=user_id,
         user_email=email,
@@ -120,6 +129,10 @@ def _personal_tenant(user_id: str, email: str | None = None) -> TenantContext:
     )
 
 
+async def personal_tenant_override(user_id: str, email: str | None = None) -> TenantContext:
+    return _personal_tenant(user_id, email)
+
+
 async def run_user_foundation_tests(runner) -> None:
     _install_fake_supabase()
 
@@ -127,29 +140,30 @@ async def run_user_foundation_tests(runner) -> None:
     user_b_id = f"usr-b-{uuid.uuid4().hex[:8]}"
 
     async def override_user_a():
+        current_user_id.set(user_a_id)  # RLS identity, as in production
         return SimpleNamespace(id=user_a_id, email=f"{user_a_id}@cyberguard.test", full_name="User A", username=None, account_type="user")
 
     async def override_user_b():
+        current_user_id.set(user_b_id)  # RLS identity, as in production
         return SimpleNamespace(id=user_b_id, email=f"{user_b_id}@cyberguard.test", full_name="User B", username=None, account_type="user")
 
     # ------------------------------------------------------------------
     # 9.1 Username uniqueness (DB constraint)
     # ------------------------------------------------------------------
     print("\n[Suite 9.1] Username uniqueness (DB)")
-    async with async_session_maker() as db:
-        suffix = uuid.uuid4().hex[:6]
-        db.add(User(id=f"u-dup-1-{suffix}", username=f"dup.user{suffix}", email=f"dup1-{suffix}@test.local", is_single_user=True))
-        await db.commit()
-        db.add(User(id=f"u-dup-2-{suffix}", username=f"dup.user{suffix}", email=f"dup2-{suffix}@test.local", is_single_user=True))
-        try:
-            await db.commit()
-            runner.assert_true(False, "Duplicate username rejected by DB unique constraint", "no error raised")
-        except IntegrityError:
-            await db.rollback()
-            runner.assert_true(True, "Duplicate username rejected by DB unique constraint")
-        except Exception as exc:  # noqa: BLE001
-            await db.rollback()
-            runner.assert_true(False, "Duplicate username rejected by DB unique constraint", str(exc))
+    suffix = uuid.uuid4().hex[:6]
+    # Provision through the service role: each user's row is only writable
+    # under its own RLS identity, so multi-user fixtures bypass via admin.
+    await create_user_admin(id=f"u-dup-1-{suffix}", username=f"dup.user{suffix}",
+                            email=f"dup1-{suffix}@test.local", is_single_user=True)
+    try:
+        await create_user_admin(id=f"u-dup-2-{suffix}", username=f"dup.user{suffix}",
+                                email=f"dup2-{suffix}@test.local", is_single_user=True)
+        runner.assert_true(False, "Duplicate username rejected by DB unique constraint", "no error raised")
+    except IntegrityError:
+        runner.assert_true(True, "Duplicate username rejected by DB unique constraint")
+    except Exception as exc:  # noqa: BLE001
+        runner.assert_true(False, "Duplicate username rejected by DB unique constraint", str(exc))
 
     # ------------------------------------------------------------------
     # 9.2 Signup API: creates user with username; duplicate username -> 409
@@ -247,7 +261,7 @@ async def run_user_foundation_tests(runner) -> None:
     # ------------------------------------------------------------------
     print("\n[Suite 9.5] Organization endpoints frozen (501)")
     app.dependency_overrides[get_current_user] = override_user_a
-    app.dependency_overrides[get_tenant_context] = lambda: _personal_tenant(user_a_id)
+    app.dependency_overrides[get_tenant_context] = partial(personal_tenant_override, user_a_id)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=60) as client:
         res_list = await client.get("/api/v1/organizations")
         runner.assert_true(res_list.status_code == 501, "GET /organizations returns 501 when frozen", f"status={res_list.status_code}")
@@ -267,7 +281,7 @@ async def run_user_foundation_tests(runner) -> None:
     # ------------------------------------------------------------------
     print("\n[Suite 9.6] Cross-user data isolation via API")
     alert_a_id = f"alert-a-{uuid.uuid4().hex[:8]}"
-    async with async_session_maker() as db:
+    async with as_user(user_a_id), async_session_maker() as db:
         db.add(
             Alert(
                 id=alert_a_id,
@@ -285,7 +299,7 @@ async def run_user_foundation_tests(runner) -> None:
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=60) as client:
         # User B sees no alerts
-        app.dependency_overrides[get_tenant_context] = lambda: _personal_tenant(user_b_id)
+        app.dependency_overrides[get_tenant_context] = partial(personal_tenant_override, user_b_id)
         res_b_list = await client.get("/api/v1/alerts")
         b_ids = [item["id"] for item in res_b_list.json() if isinstance(item, dict)]
         runner.assert_true(alert_a_id not in b_ids, "User B cannot list user A's alerts")
@@ -293,7 +307,7 @@ async def run_user_foundation_tests(runner) -> None:
         runner.assert_true(res_b_get.status_code == 404, "User B cannot fetch user A's alert by ID", f"status={res_b_get.status_code}")
 
         # User A sees their own alert
-        app.dependency_overrides[get_tenant_context] = lambda: _personal_tenant(user_a_id)
+        app.dependency_overrides[get_tenant_context] = partial(personal_tenant_override, user_a_id)
         res_a_list = await client.get("/api/v1/alerts")
         a_ids = [item["id"] for item in res_a_list.json() if isinstance(item, dict)]
         runner.assert_true(alert_a_id in a_ids, "User A sees their own alert")

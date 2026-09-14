@@ -70,6 +70,43 @@ async def resolve_email_for_identifier(identifier: str) -> Optional[str]:
         return result.scalar_one_or_none()
 
 
+async def find_user_by_email(email: str) -> Optional[dict]:
+    """Resolve an account by email (service-role lookup).
+
+    RLS on ``users`` hides other accounts from the app role, so org admin
+    member-invites resolve invitees through the service role. Returns
+    {id, email, full_name} or None.
+    """
+    from app.db.models import User
+
+    async with _get_admin_session_maker()() as session:
+        result = await session.execute(select(User).where(User.email == email).limit(1))
+        user = result.scalar_one_or_none()
+        if user is None:
+            return None
+        return {"id": user.id, "email": user.email, "full_name": user.full_name}
+
+
+async def precreate_user_for_invite(email: str) -> dict:
+    """Pre-create a user row for a member invite so they can join on first
+    login (service-role write — the app role cannot insert other users' rows
+    under RLS). Mirrors the frozen /organizations invite behavior."""
+    import uuid as _uuid
+
+    from app.db.models import User
+
+    async with _get_admin_session_maker()() as session:
+        user = User(
+            id=str(_uuid.uuid4()),
+            email=email,
+            full_name=email.split("@")[0],
+            is_single_user=False,
+        )
+        session.add(user)
+        await session.commit()
+        return {"id": user.id, "email": user.email, "full_name": user.full_name}
+
+
 # --- Connector OAuth state (service-role; the Gmail callback carries no
 # bearer token, so it cannot pass RLS. Acceptable because state is
 # high-entropy, expires after CONNECTOR_OAUTH_STATE_TTL_SECONDS, is

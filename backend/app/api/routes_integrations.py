@@ -107,6 +107,7 @@ async def _run_integration_pipeline(
 
     event = Event(
         organization_id=tenant.organization_id,
+        owner_user_id=tenant.owner_user_id,
         event_type=event_type,
         source=source,
         raw_data=raw_data,

@@ -175,3 +175,34 @@ consequences. Newest entries at the bottom.
   metric. The harness surfaced two real calibration findings on first run
   (v2 URL model FPs on benign top-1m domains; per-flow network heuristics
   blind to low-and-slow beaconing) — recorded, not fixed.
+
+- **2026-09-14 — ORG-1 foundation: header-based API keys, org-scoped gateway, salted org names, admin/analyst/viewer RBAC (Orgs Phase).**
+  The org-side surface activates as a new always-on `/orgs` router (the
+  frozen `/organizations` router stays byte-for-byte unchanged while
+  `ORG_ENABLED=false`). Binding decisions: server-to-server auth via
+  `org_authorization: <key>` header with SHA-256-hashed, prefix-displayed
+  keys (plaintext returned exactly once; SHA-256 over bcrypt/argon2 because
+  keys are 256-bit random secrets and validation is an indexed exact-match
+  lookup — no new dependency); org names salted on conflict ("Acme Corp" →
+  "Acme Corp-2") at the application layer rather than by a DB unique
+  constraint (personal workspaces legitimately share the name "Personal
+  Workspace"); gateway is organization-scoped
+  (`POST /api/v1/org/{org_id}/gateway`, actions `scan_email` / `scan_url` /
+  `ingest_log`) so a valid key against another org's endpoint is a 403.
+  RLS: all org predicates run through a `SECURITY DEFINER`
+  `org_member_role()` function — direct `EXISTS` on `organization_members`
+  from its own policy recurses infinitely — with an owner fallback (the
+  creator is definitionally an admin) that also survives `autoflush=False`
+  flush ordering. `organization_api_keys` SELECT is intentionally permissive
+  for the app role because hash validation runs before any identity exists;
+  writes are admin-gated at both the RLS and API layers. `organizations`
+  itself keeps the baseline app-role policy (tightening it would break
+  personal-workspace bootstrap); membership checks at the API layer plus
+  real RLS on the org child tables provide the isolation Suite 17 asserts.
+  Consequences: the full regression suite (which had been red since the RLS
+  baseline cutover — direct-session fixtures never stamped `app.user_id`)
+  was brought back to green with test-harness-only GUC fixes plus two real
+  RLS bug fixes (integration pipeline and action executor now propagate
+  `owner_user_id`; startup policy seeding runs via the service role); org
+  events/alerts from the gateway run under the org owner's identity, and
+  member-readable org data views are deferred to ORG-2.

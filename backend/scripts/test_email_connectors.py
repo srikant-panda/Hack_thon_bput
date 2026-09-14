@@ -34,6 +34,8 @@ from app.core.crypto import encrypt_secret  # noqa: E402
 from app.core.security import get_current_user  # noqa: E402
 from app.db.models import ConnectorOAuthState, EmailConnectorAccount  # noqa: E402
 from app.db.session import async_session_maker  # noqa: E402
+from app.db.session import current_user_id  # noqa: E402
+from _rls import as_user, create_user_admin  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -86,9 +88,14 @@ async def run_email_connector_tests(runner: TestRunner) -> None:
 
     user_a_id = f"conn-a-{uuid.uuid4().hex[:8]}"
     user_b_id = f"conn-b-{uuid.uuid4().hex[:8]}"
+    # Provision through the service role (rows are only writable under their
+    # own RLS identity) and stamp the GUC in the identity override below.
+    await create_user_admin(id=user_a_id, email=f"{user_a_id}@gmail.com", is_single_user=True)
+    await create_user_admin(id=user_b_id, email=f"{user_b_id}@gmail.com", is_single_user=True)
 
     def _override(user_id):
         async def _fn():
+            current_user_id.set(user_id)  # RLS identity, as in production
             return _user(user_id)
 
         return _fn
@@ -168,7 +175,7 @@ async def run_email_connector_tests(runner: TestRunner) -> None:
             runner.assert_true("ya29" not in url and "access_token" not in url, "URL carries no token material")
 
             state_param = url.split("state=")[1].split("&")[0]
-            async with async_session_maker() as db:
+            async with as_user(user_a_id), async_session_maker() as db:
                 row = (await db.execute(select(ConnectorOAuthState).where(ConnectorOAuthState.state == state_param))).scalar_one_or_none()
                 runner.assert_true(row is not None, "Authorize persisted a single-use state row")
                 runner.assert_true(row is not None and row.owner_user_id == user_a_id, "State row is bound to the caller")
@@ -187,7 +194,7 @@ async def run_email_connector_tests(runner: TestRunner) -> None:
             )
             runner.assert_true("ya29" not in location and "refresh_token" not in location, "Redirect contains no tokens")
 
-            async with async_session_maker() as db:
+            async with as_user(user_a_id), async_session_maker() as db:
                 rows = (
                     await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.owner_user_id == user_a_id))
                 ).scalars().all()
@@ -237,7 +244,7 @@ async def run_email_connector_tests(runner: TestRunner) -> None:
             # ------------------------------------------------------------
             print("\n[Suite 11.5] Connector listing isolation (owner filter)")
             # Create a connector for user B directly.
-            async with async_session_maker() as db:
+            async with as_user(user_b_id), async_session_maker() as db:
                 db.add(
                     EmailConnectorAccount(
                         id=f"conn-b-row-{uuid.uuid4().hex[:6]}",
@@ -272,7 +279,7 @@ async def run_email_connector_tests(runner: TestRunner) -> None:
             print("\n[Suite 11.6] Connector connection test")
             connector_id = a_items[0]["id"]
             # Force a refresh: backdate the stored access token expiry.
-            async with async_session_maker() as db:
+            async with as_user(user_a_id), async_session_maker() as db:
                 row = (await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_id))).scalar_one()
                 row.access_token_expires_at = datetime.now(timezone.utc) - timedelta(seconds=10)
                 await db.commit()
@@ -283,7 +290,7 @@ async def run_email_connector_tests(runner: TestRunner) -> None:
             runner.assert_true(data.get("ok") is True, "Connection test succeeds via token manager", f"data={data}")
             runner.assert_true(data.get("email_address") == f"{user_a_id}@gmail.com", "Test reports the mailbox identity")
 
-            async with async_session_maker() as db:
+            async with as_user(user_a_id), async_session_maker() as db:
                 row = (await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_id))).scalar_one()
                 exp = row.access_token_expires_at
                 if exp is not None and exp.tzinfo is None:
@@ -300,7 +307,7 @@ async def run_email_connector_tests(runner: TestRunner) -> None:
             res = await client.delete(f"/api/v1/connectors/{connector_id}")
             runner.assert_true(res.status_code == 200, "DELETE /connectors/{id} returns 200", f"status={res.status_code}")
             runner.assert_true(res.json().get("status") == "revoked", "Disconnect marks connector revoked")
-            async with async_session_maker() as db:
+            async with as_user(user_a_id), async_session_maker() as db:
                 row = (await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_id))).scalar_one()
                 runner.assert_true(
                     row.access_token_enc is None and row.refresh_token_enc is None,

@@ -30,7 +30,8 @@ from app.core.config import get_settings  # noqa: E402
 from app.core.crypto import encrypt_secret  # noqa: E402
 from app.core.security import get_current_user  # noqa: E402
 from app.db.models import BlockedSender, ConnectorOperationLog, EmailConnectorAccount, QuarantinedItem  # noqa: E402
-from app.db.session import async_session_maker  # noqa: E402
+from app.db.session import async_session_maker, current_user_id  # noqa: E402
+from _rls import as_user, create_user_admin  # noqa: E402
 from app.main import app  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 from app.schemas.email import NormalizedMessage  # noqa: E402
@@ -121,9 +122,10 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
 
     user_a_id = f"enf-a-{uuid.uuid4().hex[:8]}"
     connector_a_id = f"enf-conn-a-{uuid.uuid4().hex[:6]}"
+    await create_user_admin(id=user_a_id, email=f"{user_a_id}@gmail.com", is_single_user=True)
 
     # Connector with a valid (future-expiry) access token.
-    async with async_session_maker() as db:
+    async with as_user(user_a_id), async_session_maker() as db:
         db.add(
             EmailConnectorAccount(
                 id=connector_a_id,
@@ -149,6 +151,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
 
     def _override(uid):
         async def _fn():
+            current_user_id.set(uid)  # RLS identity, as in production
             return _user(uid)
 
         return _fn
@@ -200,7 +203,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
         runner.assert_true(scan.overall_severity in ("high", "critical"),
                            f"Fixture scans HIGH/CRITICAL (got {scan.overall_severity})")
 
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             connector = (
                 await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_a_id))
             ).scalar_one()
@@ -217,7 +220,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
             "Adapter create_sender_rule called for the sender",
         )
 
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             items = (
                 await db.execute(select(QuarantinedItem).where(QuarantinedItem.connector_id == connector_a_id))
             ).scalars().all()
@@ -244,7 +247,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
         # Idempotency: second enforcement of same sender does not duplicate blocks.
         message2 = _bad_message(f"msg-enf2-{uuid.uuid4().hex[:6]}")
         scan2 = await scan_message(message2)
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             connector = (
                 await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_a_id))
             ).scalar_one()
@@ -261,7 +264,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
         from app.services.scheduler import run_expiry_once
 
         # Force the item + block to be expired now.
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             for row in (await db.execute(select(QuarantinedItem))).scalars().all():
                 row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
             for row in (await db.execute(select(BlockedSender))).scalars().all():
@@ -277,7 +280,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
         runner.assert_true(
             any(c[0] == "delete_sender_rule" for c in adapter.calls), "Adapter delete_sender_rule called by scheduler"
         )
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             item_rows = (
                 await db.execute(
                     select(QuarantinedItem).where(QuarantinedItem.connector_id == connector_a_id)
@@ -304,7 +307,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
         )
         message3 = _bad_message(f"msg-enf3-{uuid.uuid4().hex[:6]}")
         scan3 = await scan_message(message3)
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             connector = (
                 await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_a_id))
             ).scalar_one()
@@ -315,7 +318,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
                            "Failed enforcement reports provider_operation_status=failed")
         runner.assert_true("insufficient_scope" in (result.provider_operation_detail or ""),
                            "Failure detail names the error class")
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             fail_logs = (
                 await db.execute(
                     select(ConnectorOperationLog).where(
@@ -331,7 +334,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
         # Re-arm an active item by force-quarantining a message with a working adapter.
         message4 = _bad_message(f"msg-enf4-{uuid.uuid4().hex[:6]}")
         scan4 = await scan_message(message4)
-        async with async_session_maker() as db:
+        async with as_user(user_a_id), async_session_maker() as db:
             connector = (
                 await db.execute(select(EmailConnectorAccount).where(EmailConnectorAccount.id == connector_a_id))
             ).scalar_one()
@@ -362,7 +365,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
 
             app.dependency_overrides[get_current_user] = _override(user_a_id)
             # Re-arm the block (the scheduler test expired it) to exercise the API path.
-            async with async_session_maker() as db:
+            async with as_user(user_a_id), async_session_maker() as db:
                 re_block = (
                     await db.execute(select(BlockedSender).where(BlockedSender.id == block.id))
                 ).scalar_one()

@@ -32,6 +32,7 @@ from app.api import (
     routes_incidents,
     routes_integrations,
     routes_organizations,
+    routes_orgs,
     routes_policies,
     routes_response,
 )
@@ -84,6 +85,8 @@ app.include_router(routes_health.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_notifications.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_organizations.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_orgs.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_orgs.gateway_router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_db.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_events.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_analysis.router, prefix=settings.API_V1_PREFIX)
