@@ -115,36 +115,31 @@ Then restart the backend (section 1).
 
 ## 4. Full reset from scratch (delete everything, rebuild)
 
-This is what was done in the 2026-09-14 rebuild. **Destroys all data.**
+**Destroys all data.** Use the dedicated drop script
+(`backend/scripts/drop_cyberguard_schema.py`) — it deletes all 92 RLS
+policies, all 24 tables, the schema itself, and the migration bookkeeping,
+with a dry-run plan, role-ownership guards and a typed confirmation:
 
 ```bash
 cd backend
+uv run python scripts/drop_cyberguard_schema.py --dry-run   # see exactly what goes
+uv run python scripts/drop_cyberguard_schema.py --yes       # actually drop it
 
-# 1. Wipe: schema + migration bookkeeping (must run as the migration role)
-uv run python - <<'EOF'
-import asyncio
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-from app.core.config import get_settings
-
-async def main():
-    engine = create_async_engine(get_settings().MIGRATION_DATABASE_URL)
-    async with engine.begin() as conn:
-        await conn.execute(text("DROP TABLE IF EXISTS public.alembic_version"))
-        await conn.execute(text("DROP SCHEMA IF EXISTS cyberguard CASCADE"))
-    await engine.dispose()
-
-asyncio.run(main())
-EOF
-
-# 2. Rebuild everything from the single baseline
+# Rebuild everything from the single baseline, then start (section 1);
+# first boot re-seeds the response catalog.
 uv run alembic upgrade head
-
-# 3. Start (section 1). First boot re-seeds the response catalog.
 ```
 
 Expected result: `alembic current` → `0001_cyberguard_baseline (head)`;
 24 tables in `cyberguard`, all with `rowsecurity = true`, 92 policies.
+
+Safety behaviour of the drop script:
+
+- connects with `MIGRATION_DATABASE_URL` (role `postgres`) and **refuses to
+  run** as the app role (`cyberguard_api`) or a non-owner of the schema;
+- `--dry-run` prints every table and its policy count without deleting;
+- without `--yes` it demands the typed phrase `DROP cyberguard`;
+- prints a post-state verification line when finished.
 
 ---
 
