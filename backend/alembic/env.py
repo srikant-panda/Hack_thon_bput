@@ -1,11 +1,14 @@
 import asyncio
+import logging
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+
+logger = logging.getLogger("alembic.env")
 
 # CYBERGUARD: all models live on the dedicated "cyberguard" schema.
 from app.core.config import get_settings
@@ -68,6 +71,17 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # Self-healing: the cyberguard schema may be missing entirely (fresh
+    # database, wiped schema). Create it before any migration runs.
+    from app.db.base import SCHEMA
+
+    try:
+        connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
+        connection.commit()
+        logger.info("ensured schema '%s' exists", SCHEMA)
+    except Exception as exc:  # noqa: BLE001 - degrade with a clear message
+        logger.warning("could not ensure schema '%s' (continuing): %s", SCHEMA, exc)
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -82,7 +96,6 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """In this scenario we need to create an Engine
     and associate a connection with the context.
-
     """
 
     connectable = async_engine_from_config(
@@ -91,10 +104,19 @@ async def run_async_migrations() -> None:
         poolclass=pool.NullPool,
     )
 
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
+    try:
+        async with connectable.connect() as connection:
+            await connection.run_sync(do_run_migrations)
+    except Exception:
+        logger.exception(
+            "Migration failed. Troubleshooting: (1) check MIGRATION_DATABASE_URL / "
+            "DATABASE_URL in backend/.env, (2) the role must own the database to "
+            "CREATE SCHEMA, (3) if a stale alembic_version table exists in the "
+            "public schema, drop it before re-baselining."
+        )
+        raise
+    finally:
+        await connectable.dispose()
 
 
 def run_migrations_online() -> None:

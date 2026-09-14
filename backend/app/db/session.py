@@ -200,11 +200,51 @@ async def _seed_default_policies() -> None:
             await session.commit()
 
 
+async def _ensure_schema_if_privileged(schema: str) -> None:
+    """Best-effort CREATE SCHEMA IF NOT EXISTS on an isolated connection.
+
+    Skipped silently when the connecting role lacks CREATE privilege on the
+    database (e.g. the cyberguard_api app role — alembic owns schema creation
+    there). Any other failure is logged without breaking startup.
+    """
+    try:
+        async with engine.connect() as conn:
+            has_create = (
+                await conn.execute(
+                    text("select has_database_privilege(current_user, current_database(), 'CREATE')")
+                )
+            ).scalar()
+            if not has_create:
+                logger.info(
+                    "role '%s' lacks CREATE privilege — skipping schema bootstrap "
+                    "(run 'uv run alembic upgrade head' to (re)create schema + RLS)",
+                    (await conn.execute(text("select current_user"))).scalar(),
+                )
+                return
+            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+        logger.info("ensured schema '%s' exists", schema)
+    except Exception as exc:  # noqa: BLE001 - never block startup on the bootstrap
+        logger.warning("could not ensure schema '%s' (run alembic upgrade head): %s", schema, exc)
+
+
 async def init_db() -> None:
-    """Initialize database tables and seed default records if needed."""
+    """Initialize database tables and seed default records if needed.
+
+    Self-healing (runbook): on PostgreSQL the ``cyberguard`` schema is created
+    on demand before create_all, so a wiped/missing schema no longer crashes
+    startup — tables are rebuilt from the ORM metadata. The attempt runs on an
+    ISOLATED connection and only when the role actually holds CREATE privilege
+    (the app role normally does not — schema creation is the migration role's
+    job via ``uv run alembic upgrade head``); a failure must never poison the
+    main create_all transaction.
+    """
     from app.db.models import ResponseCatalog
 
     logger.info("Initializing database schema on %s...", settings.async_database_url.split("@")[-1])
+    if "postgresql" in str(engine.dialect.name):
+        from app.db.base import SCHEMA
+
+        await _ensure_schema_if_privileged(SCHEMA)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
