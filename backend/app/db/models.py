@@ -141,6 +141,35 @@ class OrganizationAPIKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
 
+class OrgLogEvent(Base):
+    """Splunk-style ingested log event with detector analysis (ORG-2).
+
+    Fed exclusively by the org gateway (``POST /org/{org_id}/logs/ingest``
+    and the legacy ``action=ingest_log``) — never manual user input. The
+    log type is auto-detected from payload shape (auth | network | app) and
+    the matching detector runs before the row is stored.
+    """
+
+    __tablename__ = "org_log_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # auth | network | app — auto-detected by app.services.org_log_analyzer
+    log_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    raw_data: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+    # Structured detector output: {risk_score, severity, indicators, summary, ...}
+    analysis_result: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+    severity: Mapped[str] = mapped_column(String(16), default="safe", index=True)
+    # Manual analyst decision (block_ip, revoke_session, escalate_incident, mark_safe)
+    manual_action_taken: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    acted_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    acted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # api-key context
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+
+
 class OrganizationSetting(Base):
     """Org-level key/value preferences (ORG-1).
 

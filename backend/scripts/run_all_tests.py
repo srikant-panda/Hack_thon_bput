@@ -434,6 +434,15 @@ async def run_tests():
 
     await run_org_foundation_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 18. ORG-2 — Dashboards + Splunk Log Analysis (summary, feeds, ingest,
+    #     stream, manual actions, RBAC, isolation)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 18] ORG-2 — Dashboards + Live Log Analysis")
+    from test_org_dashboards import run_org_dashboard_tests
+
+    await run_org_dashboard_tests(runner)
+
     return runner.report()
 
 

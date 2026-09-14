@@ -9,6 +9,9 @@ import OrganizationManagement from './pages/OrganizationManagement';
 import OrganizationCreate from './pages/OrganizationCreate';
 import OrganizationSettings from './pages/OrganizationSettings';
 import OrganizationDashboard from './pages/OrganizationDashboard';
+import OrgFeatureDashboard from './pages/OrgFeatureDashboard';
+import OrgLogAnalysis from './pages/OrgLogAnalysis';
+import OrgAccountTakeover from './pages/OrgAccountTakeover';
 import AdminUsers from './pages/AdminUsers';
 import ComingSoon from './pages/ComingSoon';
 import EmailConnectors from './pages/EmailConnectors';
@@ -137,7 +140,11 @@ export default function App() {
           {/* ORG-1 foundation: always-on org endpoints (backend /orgs router) */}
           <Route path="/org/create" element={<OrganizationCreate />} />
           <Route path="/org/:orgId/settings" element={<OrganizationSettings />} />
+          {/* ORG-2: dashboards + Splunk-style live log analysis */}
           <Route path="/org/:orgId/dashboard" element={<OrganizationDashboard />} />
+          <Route path="/org/:orgId/dashboard/:feature" element={<OrgFeatureDashboard />} />
+          <Route path="/org/:orgId/logs" element={<OrgLogAnalysis />} />
+          <Route path="/org/:orgId/account-takeover" element={<OrgAccountTakeover />} />
         </Route>
         <Route path="/" element={<Landing />} />
         <Route path="*" element={<Navigate to="/" replace />} />

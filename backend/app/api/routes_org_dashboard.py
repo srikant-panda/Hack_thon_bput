@@ -1,0 +1,204 @@
+"""ORG-2: org-scoped dashboards (summary + per-feature verbose feeds).
+
+Aggregations run through the SERVICE ROLE with an explicit
+``organization_id`` filter: org rows (events/alerts/executions) are
+owner-scoped in RLS to the org creator, so member sessions would see zero
+rows. Membership is still enforced by ``require_org_role`` on the request
+path before any query runs; the service role only widens the SQL view, the
+org_id predicate keeps the data scoped to one organization.
+
+Real-time: the frontend subscribes to ``alerts``/``org_log_events`` via
+Supabase ``postgres_changes`` (migration 0009 adds both to the
+``supabase_realtime`` publication); these REST endpoints are the
+initial-load + pagination source.
+"""
+
+import logging
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import NotFoundError, ValidationError
+from app.core.permissions import OrgRole, require_org_role
+from app.db.admin import _get_admin_session_maker
+from app.db.models import (
+    ActionExecution,
+    Alert,
+    Event,
+    Organization,
+    OrganizationMember,
+    OrgLogEvent,
+)
+from app.schemas.org_dashboards import (
+    DashboardSummaryResponse,
+    FeatureDashboardResponse,
+    FeatureScanRow,
+)
+logger = logging.getLogger("cyberguard.org_dashboards")
+
+router = APIRouter(prefix="/org", tags=["Org Dashboards"])
+
+# feature slug -> alerts.module
+FEATURE_MODULES = {
+    "phishing": "phishing",
+    "url": "url",
+    "deepfake": "deepfake",
+    "impersonation": "impersonation",
+}
+
+SEVERITIES = {"safe", "low", "medium", "high", "critical"}
+
+def _parse_date(value: str | None, field: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError as exc:
+        raise ValidationError(f"Invalid {field} (expected ISO-8601)") from exc
+
+
+async def _summary(db: AsyncSession, org_id: str) -> DashboardSummaryResponse:
+    """Aggregate counts for one organization (service-role session)."""
+    total_scans = (
+        await db.execute(
+            select(func.count()).select_from(Event).where(Event.organization_id == org_id)
+        )
+    ).scalar() or 0
+    threats_detected = (
+        await db.execute(
+            select(func.count()).select_from(Alert).where(Alert.organization_id == org_id)
+        )
+    ).scalar() or 0
+    critical_alerts = (
+        await db.execute(
+            select(func.count())
+            .select_from(Alert)
+            .where(Alert.organization_id == org_id, Alert.severity == "critical")
+        )
+    ).scalar() or 0
+    quarantined_emails = (
+        await db.execute(
+            select(func.count())
+            .select_from(ActionExecution)
+            .where(
+                ActionExecution.organization_id == org_id,
+                ActionExecution.action_type == "quarantine_email",
+            )
+        )
+    ).scalar() or 0
+    blocked_senders = (
+        await db.execute(
+            select(func.count())
+            .select_from(ActionExecution)
+            .where(
+                ActionExecution.organization_id == org_id,
+                ActionExecution.action_type.like("block%"),
+            )
+        )
+    ).scalar() or 0
+    last_scan_at = (
+        await db.execute(
+            select(func.max(Event.created_at)).where(Event.organization_id == org_id)
+        )
+    ).scalar()
+    return DashboardSummaryResponse(
+        organization_id=org_id,
+        total_scans=total_scans,
+        threats_detected=threats_detected,
+        quarantined_emails=quarantined_emails,
+        blocked_senders=blocked_senders,
+        critical_alerts=critical_alerts,
+        last_scan_at=last_scan_at,
+    )
+
+
+@router.get("/{org_id}/dashboard/summary", response_model=DashboardSummaryResponse)
+async def org_dashboard_summary(
+    org_id: str,
+    member: OrganizationMember = Depends(require_org_role(OrgRole.ANALYST)),
+) -> Any:
+    """Org-scoped headline metrics (analyst+)."""
+    async with _get_admin_session_maker()() as db:
+        return await _summary(db, org_id)
+
+
+@router.get("/{org_id}/dashboard/{feature}", response_model=FeatureDashboardResponse)
+async def org_feature_dashboard(
+    org_id: str,
+    feature: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    severity: str | None = Query(default=None),
+    from_date: str | None = Query(default=None),
+    to_date: str | None = Query(default=None),
+    member: OrganizationMember = Depends(require_org_role(OrgRole.VIEWER)),
+) -> Any:
+    """Verbose per-feature scan feed (phishing | url | deepfake | impersonation)."""
+    module = FEATURE_MODULES.get(feature)
+    if module is None:
+        raise NotFoundError("Feature dashboard", feature)
+    if severity is not None and severity not in SEVERITIES:
+        raise ValidationError(f"severity must be one of {sorted(SEVERITIES)}")
+    from_dt = _parse_date(from_date, "from_date")
+    to_dt = _parse_date(to_date, "to_date")
+
+    predicates = [Alert.organization_id == org_id, Alert.module == module]
+    if severity:
+        predicates.append(Alert.severity == severity)
+    if from_dt:
+        predicates.append(Alert.created_at >= from_dt)
+    if to_dt:
+        predicates.append(Alert.created_at <= to_dt)
+
+    async with _get_admin_session_maker()() as db:
+        total = (
+            await db.execute(
+                select(func.count()).select_from(Alert).where(*predicates)
+            )
+        ).scalar() or 0
+        result = await db.execute(
+            select(Alert)
+            .where(*predicates)
+            .order_by(Alert.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        alerts = result.scalars().all()
+
+        rows: list[FeatureScanRow] = []
+        for alert in alerts:
+            latest_action = (
+                await db.execute(
+                    select(ActionExecution.action_type)
+                    .where(ActionExecution.alert_id == alert.id)
+                    .order_by(ActionExecution.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            target = None
+            for field in ("target_user", "target_service", "source_ip"):
+                value = getattr(alert, field, None)
+                if value:
+                    target = value
+                    break
+            rows.append(
+                FeatureScanRow(
+                    alert_id=alert.id,
+                    timestamp=alert.created_at,
+                    severity=alert.severity,
+                    score=alert.risk_score,
+                    title=alert.title,
+                    target=target,
+                    indicators=alert.indicators or [],
+                    explanation=alert.explanation,
+                    action_taken=latest_action,
+                )
+            )
+
+    return FeatureDashboardResponse(feature=feature, total=total, limit=limit, offset=offset, rows=rows)

@@ -153,3 +153,113 @@ export function callGateway(
     return res.json();
   });
 }
+
+// ---------------------------------------------------------------------------
+// ORG-2: dashboards + live log analysis
+// ---------------------------------------------------------------------------
+
+export type DashboardFeature = 'phishing' | 'url' | 'deepfake' | 'impersonation';
+export type LogType = 'auth' | 'network' | 'app';
+export type LogAction =
+  | 'block_ip'
+  | 'revoke_session'
+  | 'escalate_incident'
+  | 'mark_safe'
+  | 'isolate_host';
+
+export interface DashboardSummary {
+  organization_id: string;
+  total_scans: number;
+  threats_detected: number;
+  quarantined_emails: number;
+  blocked_senders: number;
+  critical_alerts: number;
+  last_scan_at: string | null;
+}
+
+export interface FeatureScanRow {
+  alert_id: string;
+  timestamp: string | null;
+  severity: string;
+  score: number;
+  title: string;
+  target: string | null;
+  indicators: Array<Record<string, unknown>>;
+  explanation: string | null;
+  action_taken: string | null;
+}
+
+export interface FeatureDashboard {
+  feature: string;
+  total: number;
+  limit: number;
+  offset: number;
+  rows: FeatureScanRow[];
+}
+
+export interface OrgLogEvent {
+  id: string;
+  log_type: LogType;
+  severity: string;
+  raw_data: Record<string, unknown>;
+  analysis_result: Record<string, unknown>;
+  manual_action_taken: string | null;
+  acted_by: string | null;
+  acted_at: string | null;
+  created_at: string | null;
+}
+
+export interface DashboardFeedParams {
+  limit?: number;
+  offset?: number;
+  severity?: string | null;
+  from_date?: string | null;
+  to_date?: string | null;
+}
+
+function qs(params: Record<string, string | number | null | undefined>): string {
+  const pairs = Object.entries(params)
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
+  return pairs.length ? `?${pairs.join('&')}` : '';
+}
+
+export function getDashboardSummary(orgId: string): Promise<DashboardSummary> {
+  return apiFetch(`/org/${orgId}/dashboard/summary`);
+}
+
+export function getFeatureDashboard(
+  orgId: string,
+  feature: DashboardFeature,
+  params: DashboardFeedParams = {},
+): Promise<FeatureDashboard> {
+  return apiFetch(
+    `/org/${orgId}/dashboard/${feature}${qs({
+      limit: params.limit,
+      offset: params.offset,
+      severity: params.severity,
+      from_date: params.from_date,
+      to_date: params.to_date,
+    })}`,
+  );
+}
+
+export function getLogStream(
+  orgId: string,
+  params: { limit?: number; severity?: string | null; log_type?: string | null } = {},
+): Promise<OrgLogEvent[]> {
+  return apiFetch(`/org/${orgId}/logs/stream${qs({ ...params })}`);
+}
+
+export function takeLogAction(
+  orgId: string,
+  logId: string,
+  action: LogAction,
+  target?: string,
+  note?: string,
+): Promise<{ log_id: string; action: string; taken_by: string; taken_at: string }> {
+  return apiFetch(`/org/${orgId}/logs/${logId}/action`, {
+    method: 'POST',
+    body: JSON.stringify({ action, target, note }),
+  });
+}

@@ -206,3 +206,29 @@ consequences. Newest entries at the bottom.
   `owner_user_id`; startup policy seeding runs via the service role); org
   events/alerts from the gateway run under the org owner's identity, and
   member-readable org data views are deferred to ORG-2.
+
+- **2026-09-15 — ORG-2: shape-based log auto-detection, alert-plane promotion, manual-decision log actions, realtime via publication filters (Orgs Phase).**
+  The Splunk plane classifies ingested logs by payload SHAPE (auth =
+  `user`+`ip`(+`status`/`location`); network = `src_ip`/`dst_ip`/`port`/
+  `bytes`/`flows`; app = everything else) rather than trusting a
+  client-declared type, and runs the matching deterministic detector with NO
+  LLM on the ingest path (provider latency/rate limits must never delay log
+  ingestion; explanations for promoted alerts use the heuristic fallback).
+  Log findings at medium+ are promoted to the alert plane (Event + Alert
+  with module account_takeover/network/api_abuse) so dashboards and realtime
+  see them. Manual analyst actions on log rows (block_ip, revoke_session,
+  isolate_host, escalate_incident, mark_safe) record the DECISION
+  (`manual_action_taken` + audit_logs entry, analyst+ RBAC) rather than
+  firing enforcement — real targets arrive with ORG-3 connectors.
+  Realtime: `org_log_events` (row filter `organization_id IS NOT NULL`) and
+  `alerts` (unfiltered — a publication row filter requires the filtered
+  column in the table's REPLICA IDENTITY, and alerts.organization_id is
+  nullable, so the filter would break every UPDATE; frontend subscribes with
+  `organization_id=eq.{org_id}` instead) are added to `supabase_realtime`.
+  Demo tradeoff: SELECT policies `TO authenticated` on the two published
+  tables let the Realtime subscriber role stream rows; tightening is tracked
+  for ORG-5. Org dashboard aggregations run through the service role with an
+  explicit organization_id predicate (org rows are owner-scoped in RLS, so
+  member sessions would see zero rows); membership is enforced at the API
+  layer first. Account Takeover ships as the Coming Soon placeholder per the
+  Excalidraw spec; auth-shaped logs are still auto-analyzed on the log plane.
