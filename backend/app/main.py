@@ -35,6 +35,7 @@ from app.api import (
     routes_orgs,
     routes_org_dashboard,
     routes_org_logs,
+    routes_org_mail,
     routes_policies,
     routes_response,
 )
@@ -91,6 +92,7 @@ app.include_router(routes_orgs.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_orgs.gateway_router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_org_dashboard.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_org_logs.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_org_mail.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_db.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_events.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_analysis.router, prefix=settings.API_V1_PREFIX)

@@ -170,6 +170,72 @@ class OrgLogEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
 
 
+class OrgMailServer(Base):
+    """Org-level mail server connector (ORG-3) — server-to-server
+    infrastructure, NOT the personal OAuth mailbox connector (Phase 2).
+
+    ``credentials_encrypted`` holds a Fernet-encrypted JSON blob with
+    provider-specific credentials (service-account key, client secret, IMAP
+    password); plaintext never hits the database, logs, or API responses.
+    Disconnect is graceful: the mail server itself stays operational, the
+    row (and credentials, unless deleted) is retained.
+    """
+
+    __tablename__ = "org_mail_servers"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_org_mail_server_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)  # "Primary Gmail"
+    # google_workspace | microsoft_365 | imap_smtp
+    provider_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # connected | disconnected | error
+    status: Mapped[str] = mapped_column(String(16), default="disconnected", index=True)
+    credentials_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+
+class OrgMailServerSetting(Base):
+    """Per-mail-server configuration (ORG-3): scan_interval_seconds,
+    quarantine_enabled, auto_block_malicious_senders, quarantine_expiry_hours."""
+
+    __tablename__ = "org_mail_server_settings"
+    __table_args__ = (UniqueConstraint("mail_server_id", "key", name="uq_org_mail_server_setting"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    mail_server_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("org_mail_servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+
+class OrgMailServerLog(Base):
+    """Per-mail-server log stream (ORG-3). Logs are grouped BY server —
+    each mail server owns its own stream (connection | scan | quarantine |
+    error); they are never dumped into one combined feed."""
+
+    __tablename__ = "org_mail_server_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    mail_server_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("org_mail_servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # connection | scan | quarantine | error
+    log_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(PortableJSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+
+
 class OrganizationSetting(Base):
     """Org-level key/value preferences (ORG-1).
 

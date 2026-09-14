@@ -263,3 +263,102 @@ export function takeLogAction(
     body: JSON.stringify({ action, target, note }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// ORG-3: org mail server connectors (server-to-server infrastructure)
+// ---------------------------------------------------------------------------
+
+export type MailProviderType = 'google_workspace' | 'microsoft_365' | 'imap_smtp';
+
+export interface MailServer {
+  id: string;
+  name: string;
+  provider_type: MailProviderType;
+  status: 'connected' | 'disconnected' | 'error';
+  last_connected_at: string | null;
+  last_error: string | null;
+  has_credentials: boolean;
+  created_at?: string;
+}
+
+export interface MailServerLog {
+  id: string;
+  mail_server_id: string;
+  log_type: 'connection' | 'scan' | 'quarantine' | 'error';
+  message: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export interface MailServerCredentialDraft {
+  service_account_key?: string;
+  delegated_user?: string;
+  client_id?: string;
+  client_secret?: string;
+  tenant_id?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+}
+
+export function listMailServers(orgId: string): Promise<MailServer[]> {
+  return apiFetch(`/org/${orgId}/mail-servers`);
+}
+
+export function createMailServer(
+  orgId: string,
+  name: string,
+  provider_type: MailProviderType,
+  credentials?: MailServerCredentialDraft,
+): Promise<MailServer> {
+  return apiFetch(`/org/${orgId}/mail-servers`, {
+    method: 'POST',
+    body: JSON.stringify({ name, provider_type, credentials }),
+  });
+}
+
+export function connectMailServer(
+  orgId: string,
+  serverId: string,
+  credentials?: MailServerCredentialDraft,
+): Promise<{ id: string; status: string }> {
+  return apiFetch(`/org/${orgId}/mail-servers/${serverId}/connect`, {
+    method: 'POST',
+    body: JSON.stringify(credentials ? { credentials } : {}),
+  });
+}
+
+export function disconnectMailServer(orgId: string, serverId: string): Promise<{ id: string; status: string }> {
+  return apiFetch(`/org/${orgId}/mail-servers/${serverId}/disconnect`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export function deleteMailServer(orgId: string, serverId: string): Promise<{ message: string }> {
+  return apiFetch(`/org/${orgId}/mail-servers/${serverId}`, { method: 'DELETE' });
+}
+
+export function listMailServerLogs(
+  orgId: string,
+  serverId: string,
+  params: { limit?: number; log_type?: string | null; from_date?: string | null; to_date?: string | null } = {},
+): Promise<MailServerLog[]> {
+  return apiFetch(`/org/${orgId}/mail-servers/${serverId}/logs${qs({ ...params })}`);
+}
+
+export function getMailServerSettings(
+  orgId: string,
+  serverId: string,
+): Promise<{ mail_server_id: string; settings: Record<string, unknown> }> {
+  return apiFetch(`/org/${orgId}/mail-servers/${serverId}/settings`);
+}
+
+export function updateMailServerSettings(
+  orgId: string,
+  serverId: string,
+  settings: Record<string, unknown>,
+): Promise<{ mail_server_id: string; settings: Record<string, unknown> }> {
+  return apiFetch(`/org/${orgId}/mail-servers/${serverId}/settings`, {
+    method: 'PUT',
+    body: JSON.stringify({ settings }),
+  });
+}

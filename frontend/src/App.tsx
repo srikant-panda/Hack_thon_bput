@@ -12,6 +12,9 @@ import OrganizationDashboard from './pages/OrganizationDashboard';
 import OrgFeatureDashboard from './pages/OrgFeatureDashboard';
 import OrgLogAnalysis from './pages/OrgLogAnalysis';
 import OrgAccountTakeover from './pages/OrgAccountTakeover';
+import OrgMailServers from './pages/OrgMailServers';
+import OrgMailServerLogs from './pages/OrgMailServerLogs';
+import OrgMailServerSettings from './pages/OrgMailServerSettings';
 import AdminUsers from './pages/AdminUsers';
 import ComingSoon from './pages/ComingSoon';
 import EmailConnectors from './pages/EmailConnectors';
@@ -145,6 +148,10 @@ export default function App() {
           <Route path="/org/:orgId/dashboard/:feature" element={<OrgFeatureDashboard />} />
           <Route path="/org/:orgId/logs" element={<OrgLogAnalysis />} />
           <Route path="/org/:orgId/account-takeover" element={<OrgAccountTakeover />} />
+          {/* ORG-3: server-to-server mail connectors */}
+          <Route path="/org/:orgId/mail-servers" element={<OrgMailServers />} />
+          <Route path="/org/:orgId/mail-servers/:serverId/logs" element={<OrgMailServerLogs />} />
+          <Route path="/org/:orgId/mail-servers/:serverId/settings" element={<OrgMailServerSettings />} />
         </Route>
         <Route path="/" element={<Landing />} />
         <Route path="*" element={<Navigate to="/" replace />} />

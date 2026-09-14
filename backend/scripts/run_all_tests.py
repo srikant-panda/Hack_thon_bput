@@ -443,6 +443,15 @@ async def run_tests():
 
     await run_org_dashboard_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 19. ORG-3 — Mail Server Connectors (server-to-server, per-server
+    #     logs/settings, graceful disconnect, encrypted credentials)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 19] ORG-3 — Mail Server Connectors")
+    from test_org_mail_connectors import run_org_mail_tests
+
+    await run_org_mail_tests(runner)
+
     return runner.report()
 
 

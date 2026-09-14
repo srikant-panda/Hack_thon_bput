@@ -58,6 +58,13 @@ const MODULES = [
     enabled: true,
   },
   {
+    to: '../mail-servers',
+    label: 'Mail Servers',
+    description: 'Server-to-server connectors (Workspace, M365, IMAP) with per-server settings and logs.',
+    icon: Mail,
+    enabled: true,
+  },
+  {
     to: '../account-takeover',
     label: 'Account Takeover',
     description: 'Coming soon.',

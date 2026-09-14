@@ -232,3 +232,30 @@ consequences. Newest entries at the bottom.
   member sessions would see zero rows); membership is enforced at the API
   layer first. Account Takeover ships as the Coming Soon placeholder per the
   Excalidraw spec; auth-shaped logs are still auto-analyzed on the log plane.
+
+- **2026-09-15 — ORG-3: org mail connectors as infrastructure management, not personal OAuth; pluggable transports without new dependencies; per-server log grouping; graceful disconnect (Orgs Phase).**
+  Org mail servers are managed like server assets — a unique-named row per
+  server with provider-specific encrypted credentials, its own settings, and
+  its own log stream — explicitly distinct from the Phase-2 personal Gmail
+  OAuth connector (whose code paths are untouched). Credentials are JSON
+  blobs validated against per-provider required fields and Fernet-encrypted
+  at rest under the shared CONNECTOR_TOKEN_KEY; plaintext never appears in
+  the DB, logs, or API responses (a boolean has_credentials is exposed
+  instead). Wire protocol lives behind a pluggable transport registry: the
+  shipped SimulationTransport performs real credential validation and
+  returns clearly-flagged simulated results (mirroring action_executor's
+  honest-simulation pattern), because the prompt's named drivers
+  (google-api-python-client, msal) are third-party packages outside the
+  frozen dependency set — stdlib imaplib needs no package but the transport
+  seam is identical for all three; installing real drivers later is a
+  transport registration with zero product-code changes. Logs are grouped
+  BY mail server (org_mail_server_logs keyed on mail_server_id, every query
+  and UI surface filters per server) because correlating two independent
+  infrastructure streams would misattribute connector errors to the wrong
+  server. Disconnect is graceful by design: CYBERGUARD stops reading, the
+  mail server itself keeps running, and credentials are RETAINED so an admin
+  can reconnect without re-entering secrets — deletion is the only path that
+  removes stored credentials and the server's log stream. RLS: settings are
+  admin/analyst-readable and viewer-blocked at both the API and RLS layers;
+  logs reach the owning org through the parent server row's
+  org_member_role() predicate.
