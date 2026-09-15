@@ -227,6 +227,10 @@ async def enforce_scan_result(
             if settings.quarantine_expiry_hours
             else None
         )
+        stored = scan.model_dump(mode="json")
+        # Quarantine preview (offline): keep the message body with the item so
+        # the review drawer renders it without a provider round trip.
+        stored["message_body"] = (message.body_text or message.body_html or "")[:8000]
         item = QuarantinedItem(
             owner_user_id=connector.owner_user_id,
             connector_id=connector.id,
@@ -234,7 +238,7 @@ async def enforce_scan_result(
             sender_email=sender,
             reason=f"{scan.overall_severity} verdict: {scan.recommended_action}",
             severity=scan.overall_severity,
-            scan_result_json=scan.model_dump(mode="json"),
+            scan_result_json=stored,
             expires_at=expires_at,
             status="quarantined",
         )
@@ -387,4 +391,16 @@ async def enforce_scan_results(
                 scan.provider_operation_status = "no_action_required"
             outs.append(scan)
         return outs
-    return [await enforce_scan_result(db, connector, message, scan) for message, scan in pairs]
+    results: list[ScanResult] = []
+    for message, scan in pairs:
+        try:
+            results.append(await enforce_scan_result(db, connector, message, scan))
+        except Exception as exc:  # noqa: BLE001 - provider writes already happened;
+            # report honestly per message instead of failing the whole scan
+            scan.provider_operation_status = "failed"
+            scan.provider_operation_detail = (
+                f"{type(exc).__name__}: {exc}. The provider-side operation may "
+                "have completed — check Security History before retrying."
+            )
+            results.append(scan)
+    return results

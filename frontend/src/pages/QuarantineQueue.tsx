@@ -3,10 +3,15 @@ import {
   AlertTriangle,
   Archive,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Folder,
   History,
   Inbox,
   Loader2,
+  Mail,
   RefreshCw,
+  Search,
   ShieldCheck,
   ShieldOff,
   Trash2,
@@ -41,6 +46,15 @@ export default function QuarantineQueue() {
   const [selected, setSelected] = useState<QuarantinedItem | null>(null);
   const [review, setReview] = useState<QuarantineReview | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  // Search (sender email / subject keyword / event-time range) — F4.
+  const [searchSender, setSearchSender] = useState('');
+  const [searchSubject, setSearchSubject] = useState('');
+  const [searchFrom, setSearchFrom] = useState('');
+  const [searchTo, setSearchTo] = useState('');
+  // Dismissed rows (cross button on resolved entries) — F4.
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  // Provider folder collapse state — F3.
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -153,8 +167,45 @@ export default function QuarantineQueue() {
     }
   };
 
-  const activeItems = items.filter((i) => i.status === 'quarantined');
-  const pastItems = items.filter((i) => i.status !== 'quarantined');
+  const matchesSearch = (i: QuarantinedItem) => {
+    if (searchSender && !i.sender_email.toLowerCase().includes(searchSender.toLowerCase())) return false;
+    if (searchSubject && !(i.scan_result?.subject ?? '').toLowerCase().includes(searchSubject.toLowerCase())) return false;
+    const when = i.quarantined_at ? new Date(i.quarantined_at).getTime() : null;
+    if (searchFrom && (when === null || when < new Date(searchFrom).getTime())) return false;
+    if (searchTo && (when === null || when > new Date(searchTo).getTime() + 86_399_000)) return false;
+    return true;
+  };
+  const visible = items.filter((i) => !dismissed.has(i.id));
+  const activeItems = visible.filter((i) => i.status === 'quarantined' && matchesSearch(i));
+  const pastItems = visible.filter((i) => i.status !== 'quarantined' && matchesSearch(i));
+
+  // Folder-style grouping by mail provider (Gmail / Outlook / …) — F3.
+  const providerLabel = (pv: string | null | undefined) =>
+    !pv ? 'Other mailboxes' : pv === 'gmail' ? 'Gmail' : pv === 'outlook' ? 'Outlook' : pv.charAt(0).toUpperCase() + pv.slice(1);
+  const allVisible = [...activeItems, ...pastItems];
+  const groupedFolders = Array.from(
+    new Map<string, QuarantinedItem[]>(allVisible.map((i) => [providerLabel(i.provider), [
+      ...(allVisible.filter((x) => providerLabel(x.provider) === providerLabel(i.provider))),
+    ]])),
+  ).map(([label, groupItems]) => ({
+    label,
+    count: groupItems.length,
+    active: groupItems.filter((i) => i.status === 'quarantined').length,
+    items: groupItems,
+  }));
+  const toggleFolder = (label: string) =>
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  const dismiss = (id: string) =>
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
 
   return (
     <div className="space-y-6">
@@ -219,6 +270,40 @@ export default function QuarantineQueue() {
         </div>
       )}
 
+      {/* Search: sender email / subject keyword / event-time range (F4) */}
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/90 px-5 py-3.5 shadow-sm backdrop-blur">
+        <Search className="h-4 w-4 text-zinc-500" />
+        <input
+          type="text"
+          value={searchSender}
+          onChange={(e) => setSearchSender(e.target.value)}
+          placeholder="Sender email…"
+          className="w-52 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 outline-none focus:border-red-500/60"
+        />
+        <input
+          type="text"
+          value={searchSubject}
+          onChange={(e) => setSearchSubject(e.target.value)}
+          placeholder="Subject keyword…"
+          className="w-52 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 outline-none focus:border-red-500/60"
+        />
+        <label className="text-[10px] uppercase tracking-wider text-zinc-500">From</label>
+        <input type="date" value={searchFrom} onChange={(e) => setSearchFrom(e.target.value)}
+          className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-red-500/60" />
+        <label className="text-[10px] uppercase tracking-wider text-zinc-500">To</label>
+        <input type="date" value={searchTo} onChange={(e) => setSearchTo(e.target.value)}
+          className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-red-500/60" />
+        {(searchSender || searchSubject || searchFrom || searchTo) !== '' && (
+          <button
+            type="button"
+            onClick={() => { setSearchSender(''); setSearchSubject(''); setSearchFrom(''); setSearchTo(''); }}
+            className="ml-auto inline-flex items-center gap-1 text-[11px] text-zinc-400 transition hover:text-zinc-200"
+          >
+            <X className="h-3 w-3" /> Clear
+          </button>
+        )}
+      </div>
+
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-sm backdrop-blur">
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
           <h2 className="text-sm font-semibold text-zinc-100">
@@ -239,14 +324,31 @@ export default function QuarantineQueue() {
           <div className="flex items-center justify-center gap-2 px-5 py-10 text-sm text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading quarantine queue…
           </div>
-        ) : items.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="px-5 py-10 text-center text-sm text-zinc-500">
-            Nothing quarantined yet. Run a mailbox scan from Email Connectors — high and critical
-            verdicts are quarantined automatically when auto-enforcement is on.
+            Nothing quarantined yet. New mail is scanned automatically every few minutes (or run a
+            mailbox scan from Email Connectors) — high and critical verdicts are quarantined
+            automatically when auto-enforcement is on.
           </div>
+        ) : allVisible.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-zinc-500">No items match the search.</div>
         ) : (
           <div className="divide-y divide-zinc-800">
-            {[...activeItems, ...pastItems].map((item) => (
+            {groupedFolders.filter((f) => f.items.length > 0).map((folder) => (
+              <div key={folder.label}>
+                <button
+                  type="button"
+                  onClick={() => toggleFolder(folder.label)}
+                  className="flex w-full items-center gap-2.5 bg-zinc-950/60 px-5 py-2.5 text-left transition hover:bg-zinc-900"
+                >
+                  {collapsedFolders.has(folder.label) ? <ChevronRight className="h-4 w-4 text-zinc-500" /> : <ChevronDown className="h-4 w-4 text-zinc-500" />}
+                  <Folder className="h-4 w-4 text-red-400" />
+                  <span className="text-xs font-bold text-zinc-100">{folder.label}</span>
+                  <span className="font-mono text-[10px] text-zinc-500">
+                    {folder.count} item{folder.count === 1 ? '' : 's'} · {folder.active} quarantined
+                  </span>
+                </button>
+                {!collapsedFolders.has(folder.label) && folder.items.map((item) => (
               <div key={item.id} className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -279,6 +381,16 @@ export default function QuarantineQueue() {
                     <History className="h-3.5 w-3.5" />
                     Review
                   </button>
+                  {item.status !== 'quarantined' && (
+                    <button
+                      type="button"
+                      onClick={() => dismiss(item.id)}
+                      title="Remove this resolved entry from the queue view"
+                      className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-400 transition hover:border-red-500/40 hover:text-red-400"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   {item.status === 'quarantined' && (
                     <>
                       <button
@@ -311,6 +423,8 @@ export default function QuarantineQueue() {
                     </>
                   )}
                 </div>
+              </div>
+                ))}
               </div>
             ))}
           </div>
@@ -366,6 +480,18 @@ export default function QuarantineQueue() {
                   <VerboseResultPanel scan={review.scan_result} />
                 ) : (
                   <p className="text-sm text-zinc-500">No stored analysis for this item.</p>
+                )}
+
+                {/* Email body preview (stored with the quarantined item) */}
+                {(selected.scan_result?.message_body || review.scan_result?.message_body) && (
+                  <div className="mt-5">
+                    <h4 className="mb-2 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                      <Mail className="h-3.5 w-3.5 text-red-400" /> Email body
+                    </h4>
+                    <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-xs leading-relaxed text-zinc-300">
+                      {selected.scan_result?.message_body ?? review.scan_result?.message_body}
+                    </pre>
+                  </div>
                 )}
 
                 {/* Event chain timeline */}

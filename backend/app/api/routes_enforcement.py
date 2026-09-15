@@ -33,6 +33,7 @@ router = APIRouter(prefix="/enforcement", tags=["Enforcement"])
 class QuarantinedItemRead(BaseModel):
     id: str
     connector_id: str
+    provider: Optional[str] = None
     provider_message_id: str
     sender_email: str
     reason: str
@@ -49,6 +50,7 @@ class QuarantineListResponse(BaseModel):
 
 
 class BlockedSenderRead(BaseModel):
+    provider: Optional[str] = None
     id: str
     connector_id: str
     sender_email: str
@@ -99,10 +101,11 @@ def _iso(dt) -> Optional[str]:
     return dt.isoformat() if dt else None
 
 
-def _serialize_item(item: QuarantinedItem) -> QuarantinedItemRead:
+def _serialize_item(item: QuarantinedItem, provider: Optional[str] = None) -> QuarantinedItemRead:
     return QuarantinedItemRead(
         id=item.id,
         connector_id=item.connector_id,
+        provider=provider,
         provider_message_id=item.provider_message_id,
         sender_email=item.sender_email,
         reason=item.reason,
@@ -115,10 +118,23 @@ def _serialize_item(item: QuarantinedItem) -> QuarantinedItemRead:
     )
 
 
-def _serialize_block(block: BlockedSender) -> BlockedSenderRead:
+async def _provider_map(owner_user_id: str, db: AsyncSession) -> dict[str, str]:
+    from app.db.models import EmailConnectorAccount  # local: avoid import cycle at module load
+    rows = (
+        await db.execute(
+            select(EmailConnectorAccount.id, EmailConnectorAccount.provider).where(
+                EmailConnectorAccount.owner_user_id == owner_user_id
+            )
+        )
+    ).all()
+    return {row[0]: row[1] for row in rows}
+
+
+def _serialize_block(block: BlockedSender, provider: Optional[str] = None) -> BlockedSenderRead:
     return BlockedSenderRead(
         id=block.id,
         connector_id=block.connector_id,
+        provider=provider,
         sender_email=block.sender_email,
         provider_rule_id=block.provider_rule_id,
         reason=block.reason,
@@ -180,7 +196,13 @@ async def list_quarantine(
             .order_by(QuarantinedItem.quarantined_at.desc())
         )
     ).scalars().all()
-    return QuarantineListResponse(items=[_serialize_item(i) for i in items])
+    provider_by_connector = await _provider_map(user.id, db)
+    return QuarantineListResponse(
+        items=[
+            _serialize_item(i, provider_by_connector.get(i.connector_id))
+            for i in items
+        ]
+    )
 
 
 @router.post("/quarantine/{item_id}/release", response_model=EnforcementActionResponse)
@@ -499,6 +521,7 @@ async def list_blocked_senders(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BlockedSenderListResponse:
+    provider_by_connector = await _provider_map(user.id, db)
     blocks = (
         await db.execute(
             select(BlockedSender)
@@ -506,7 +529,7 @@ async def list_blocked_senders(
             .order_by(BlockedSender.blocked_at.desc())
         )
     ).scalars().all()
-    return BlockedSenderListResponse(items=[_serialize_block(b) for b in blocks])
+    return BlockedSenderListResponse(items=[_serialize_block(b, provider_by_connector.get(b.connector_id)) for b in blocks])
 
 
 @router.post("/blocked-senders/{block_id}/release", response_model=EnforcementActionResponse)

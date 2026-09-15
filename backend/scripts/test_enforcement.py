@@ -29,11 +29,18 @@ if ROOT not in sys.path:
 from app.core.config import get_settings  # noqa: E402
 from app.core.crypto import encrypt_secret  # noqa: E402
 from app.core.security import get_current_user  # noqa: E402
-from app.db.models import BlockedSender, ConnectorOperationLog, EmailConnectorAccount, QuarantinedItem  # noqa: E402
+from app.db.models import (  # noqa: E402
+    BlockedSender,
+    ConnectorOperationLog,
+    EmailConnectorAccount,
+    QuarantinedItem,
+    SecurityEvent,
+)
 from app.db.session import async_session_maker, current_user_id  # noqa: E402
 from _rls import as_user, create_user_admin  # noqa: E402
+from app.db.admin import _get_admin_session_maker  # noqa: E402
 from app.main import app  # noqa: E402
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select, text  # noqa: E402
 from app.schemas.email import NormalizedMessage  # noqa: E402
 from app.services.email_providers.base import EmailProviderError, ProviderErrorClass  # noqa: E402
 from app.services.email_providers.gmail import gmail_provider  # noqa: E402
@@ -377,6 +384,97 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
             res_unblock = await client.post(f"/api/v1/enforcement/blocked-senders/{block.id}/release")
             runner.assert_true(res_unblock.status_code == 200 and res_unblock.json()["status"] == "released",
                                "Unblock sender works and updates status")
+
+        app.dependency_overrides.pop(get_current_user, None)
+
+        # --------------------------------------------------------------
+        # 13.9 Auto-scan scheduler (new-mail detection): dedupe + verdicts
+        # --------------------------------------------------------------
+        print("\n[Suite 13.9] Auto-scan scheduler (new-mail detection)")
+        from app.schemas.email import NormalizedMessage
+        from app.services.scheduler import run_auto_scan_once
+        from app.services import email_providers as _ep
+
+        autoscan_owner = f"autoscan-{uuid.uuid4().hex[:8]}"
+        autoscan_conn = f"autoscan-conn-{uuid.uuid4().hex[:6]}"
+        await create_user_admin(id=autoscan_owner, email=f"{autoscan_owner}@stub.test", is_single_user=True)
+        async with as_user(autoscan_owner), async_session_maker() as db:
+            db.add(EmailConnectorAccount(
+                id=autoscan_conn, owner_user_id=autoscan_owner, provider="autoscan_stub",
+                provider_email=f"{autoscan_owner}@stub.test", status="connected",
+                access_token_enc=encrypt_secret("autoscan-token"),
+                access_token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            ))
+            await db.commit()
+
+        class _StubAutoScanProvider:
+            capabilities = {"supports_read": True, "supports_quarantine": False}
+            calls = {"list": 0}
+
+            async def list_messages(self, access_token, max_results=50):
+                self.calls["list"] += 1
+                return [{"id": f"auto-msg-{i}", "thread_id": f"t{i}"} for i in range(2)]
+
+            async def get_message(self, access_token, message_id):
+                return NormalizedMessage(
+                    provider_message_id=message_id, provider="autoscan_stub",
+                    sender="newsletter@benign.example",
+                    subject="Auto-scan probe", body_text="Regular newsletter body.",
+                )
+
+        stub = _StubAutoScanProvider()
+        _ep.register_provider("autoscan_stub", stub) if hasattr(_ep, "register_provider") else None
+        from app.services.email_providers import registry as _registry_mod
+        _orig_provider = None
+        if hasattr(_ep, "get_provider"):
+            _orig_provider = _ep.get_provider
+
+        def _fake_get_provider(name):
+            if name == "autoscan_stub":
+                return stub
+            return _orig_provider(name)
+
+        import app.services.email_providers as _ep_pkg
+        _orig_pkg_get = _ep_pkg.get_provider
+        _ep_pkg.get_provider = _fake_get_provider
+        # the scheduler imported get_provider by name — patch its reference too
+        import app.services.scheduler as _sched
+        _orig_sched_get = _sched.get_provider
+        _sched.get_provider = _fake_get_provider
+        try:
+            stats1 = await run_auto_scan_once()
+            runner.assert_true(
+                stats1["connectors_scanned"] == 1 and stats1["messages_scanned"] == 2,
+                f"Auto-scan analyzes 2 new messages on first pass (got {stats1})",
+            )
+            stats2 = await run_auto_scan_once()
+            runner.assert_true(
+                stats2["messages_scanned"] == 0,
+                f"Auto-scan dedupes: second pass analyzes 0 messages (got {stats2})",
+            )
+            async with as_user(autoscan_owner), async_session_maker() as db:
+                verdicts = (await db.execute(
+                    select(SecurityEvent).where(
+                        SecurityEvent.owner_user_id == autoscan_owner,
+                        SecurityEvent.event_type == "scan_verdict",
+                    )
+                )).scalars().all()
+            runner.assert_true(len(verdicts) == 2, "scan_verdict history rows written by auto-scan")
+            benign = [v for v in verdicts if "newsletter" in (v.sender_email or "")]
+            runner.assert_true(
+                len(benign) == 2 and all((v.severity or "") in ("safe", "low") for v in benign),
+                "Benign auto-scanned mail stays safe/low (no enforcement)",
+            )
+        finally:
+            _ep_pkg.get_provider = _orig_pkg_get
+            _sched.get_provider = _orig_sched_get
+            async with _get_admin_session_maker()() as db:
+                for tbl in ("security_events", "quarantined_items", "connector_settings",
+                            "blocked_senders", "connector_operation_logs"):
+                    col = "owner_user_id"
+                    await db.execute(text(f"delete from cyberguard.{tbl} where {col} = :o"), {"o": autoscan_owner})
+                await db.execute(text("delete from cyberguard.email_connector_accounts where id = :i"), {"i": autoscan_conn})
+                await db.commit()
 
         app.dependency_overrides.pop(get_current_user, None)
 
