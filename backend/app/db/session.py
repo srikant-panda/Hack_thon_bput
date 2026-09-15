@@ -179,30 +179,30 @@ async def _seed_default_policies() -> None:
     from app.db.models import EnforcementPolicy, Organization
 
     async with _get_admin_session_maker()() as session:
-        result = await session.execute(select(Organization))
-        orgs = result.scalars().all()
+        # One set-based lookup (startup perf): the naive per-org existence
+        # query costs one remote round trip per organization (~0.3s each on a
+        # hosted Postgres — minutes once the org count grows). A single
+        # NOT-EXISTS select finds every org missing an active policy in one
+        # round trip.
+        orgs_with_policy = select(EnforcementPolicy.organization_id).where(
+            EnforcementPolicy.organization_id.is_not(None),
+            EnforcementPolicy.is_active.is_(True),  # noqa: E712 - SQLAlchemy comparison
+        )
+        result = await session.execute(
+            select(Organization).where(Organization.id.not_in(orgs_with_policy))
+        )
+        unseeded = result.scalars().all()
 
-        seeded = 0
-        for org in orgs:
-            existing = await session.execute(
-                select(EnforcementPolicy).where(
-                    EnforcementPolicy.organization_id == org.id,
-                    EnforcementPolicy.is_active == True,  # noqa: E712 - SQLAlchemy comparison
-                )
-            )
-            if existing.scalars().first() is not None:
-                continue
-
+        for org in unseeded:
             session.add(EnforcementPolicy(
                 organization_id=org.id,
                 name="Balanced (default)",
                 description="Auto-block critical/high, require approval for medium.",
                 is_active=True,
             ))
-            seeded += 1
 
-        if seeded:
-            logger.info("Seeded default enforcement policies for %d organization(s)...", seeded)
+        if unseeded:
+            logger.info("Seeded default enforcement policies for %d organization(s)...", len(unseeded))
             await session.commit()
 
 
@@ -233,6 +233,43 @@ async def _ensure_schema_if_privileged(schema: str) -> None:
         logger.warning("could not ensure schema '%s' (run alembic upgrade head): %s", schema, exc)
 
 
+async def _all_tables_present() -> bool:
+    """True when every ORM table already exists in the PostgreSQL schema.
+
+    ``create_all(checkfirst=True)`` then does nothing — but its per-table
+    reflection costs one or more network round trips per table (~55s for 33
+    tables against a remote Supabase), so we replace it with a single
+    information_schema query. A wiped or partial schema returns False and the
+    create_all self-healing path runs exactly as before. SQLite always runs
+    create_all (no schema-qualified catalog to query).
+    """
+    if "postgresql" not in str(engine.dialect.name):
+        return False
+    try:
+        from app.db.base import SCHEMA
+
+        expected = {t.name for t in Base.metadata.sorted_tables}
+        async with engine.connect() as conn:
+            rows = (
+                await conn.execute(
+                    text(
+                        "select table_name from information_schema.tables "
+                        "where table_schema = :schema"
+                    ),
+                    {"schema": SCHEMA},
+                )
+            ).scalars().all()
+        present = set(rows)
+        missing = expected - present
+        if missing:
+            logger.info("schema missing %d table(s) — running create_all", len(missing))
+            return False
+        return True
+    except Exception as exc:  # noqa: BLE001 - fall back to create_all always
+        logger.debug("table-presence check failed (%s) — using create_all", exc)
+        return False
+
+
 async def init_db() -> None:
     """Initialize database tables and seed default records if needed.
 
@@ -243,16 +280,24 @@ async def init_db() -> None:
     (the app role normally does not — schema creation is the migration role's
     job via ``uv run alembic upgrade head``); a failure must never poison the
     main create_all transaction.
+
+    Fast path: when every ORM table already exists, create_all would be a
+    no-op paying ~1.7s of remote reflection per table — replace it with one
+    information_schema query. A wiped or partial database fails the check and
+    self-heals exactly as before.
     """
     from app.db.models import ResponseCatalog
 
     logger.info("Initializing database schema on %s...", settings.async_database_url.split("@")[-1])
-    if "postgresql" in str(engine.dialect.name):
-        from app.db.base import SCHEMA
+    if "postgresql" in str(engine.dialect.name) and await _all_tables_present():
+        logger.info("all ORM tables present — skipping create_all (fast startup)")
+    else:
+        if "postgresql" in str(engine.dialect.name):
+            from app.db.base import SCHEMA
 
-        await _ensure_schema_if_privileged(SCHEMA)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+            await _ensure_schema_if_privileged(SCHEMA)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     # Seed response catalog
     async with async_session_maker() as session:
