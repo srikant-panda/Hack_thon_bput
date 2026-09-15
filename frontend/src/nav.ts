@@ -17,6 +17,7 @@
 import {
   Ban,
   Bell,
+  BookOpen,
   Building2,
   ClipboardCheck,
   FileBarChart,
@@ -80,6 +81,7 @@ export const NAV_ITEMS: NavItem[] = [
   // --- system ---
   { to: '/reports', label: 'Reports', icon: FileBarChart, scope: 'org', section: 'system' },
   { to: '/settings', label: 'Settings', icon: Settings, scope: 'both', section: 'system' },
+  { to: '/docs', label: 'Documentation', icon: BookOpen, scope: 'both', section: 'system' },
 ];
 
 /** Routes that org-only in the *analyze* group (guarded, not hidden). */

@@ -4,6 +4,7 @@ export {
   Ban,
   BarChart3,
   Bell,
+  BookOpen,
   Building2,
   ClipboardCheck,
   FileBarChart,

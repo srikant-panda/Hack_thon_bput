@@ -278,3 +278,24 @@ consequences. Newest entries at the bottom.
   both the API and RLS layers; writes are admin-only. The Phase 7 per-user
   notification_email paths are untouched — org notifications are a parallel
   system with its own tables, routing, and templates.
+
+- **2026-09-15 — ORG-5: in-app docs with provenance-tracked content + realtime policy tightening completes the org phase (Orgs Phase).**
+  The /docs page renders a typed content module (src/docs/content.ts) whose
+  examples are mechanically constrained to real artifacts: executed curls
+  (recorded in src/docs/PROVENANCE.md), suite-verified outputs, eval-report
+  metrics/findings, fixture files, and route transcriptions. The check
+  script (frontend/scripts/check-docs.mjs) enforces four invariants — every
+  feature guide carries an example, all anchors resolve, audience/minRole
+  tags are valid, and every api-reference row matches a REAL route parsed
+  from backend routers — and caught two genuine transcription errors on its
+  first run (quarantine routes live under /enforcement/*), which is the
+  argument for mechanical provenance over prose. Gating: org-audience
+  sections badge as "Organization feature" in personal workspaces; minRole
+  sections render a reduced set for viewers (RoleGuard-style). Realtime
+  tightening (deferred from ORG-2): migration 0012 replaces the permissive
+  authenticated SELECT policies on org_log_events + alerts with
+  membership-gated predicates through the SECURITY DEFINER
+  org_member_role() keyed on auth.uid() (WALRUS), with a personal-owner
+  branch for alerts; clean no-op on SQLite/vanilla PG where auth.uid()
+  does not exist. Realtime subscribers now stream only rows the calling
+  user is entitled to — the demo tradeoff recorded at ORG-2 is closed.

@@ -1,7 +1,7 @@
 # CYBERGUARD Evaluation Harness Report
 
-- Generated: 2026-09-13T19:38:12.352702+00:00
-- Git tip: 084c446
+- Generated: 2026-09-15T16:10:40.007490+00:00
+- Git tip: 49821b5
 - Scale option: default
 - Data mode: auto
 
@@ -28,18 +28,18 @@
 
 ## HTTP latency (sampled analysis requests)
 
-- `/api/v1/analysis/email`: n=20 p50=381.5ms p95=2243.8ms p99=2243.8ms
-- `/api/v1/analysis/url`: n=20 p50=369.8ms p95=548.1ms p99=548.1ms
-- `/api/v1/analysis/account-takeover`: n=10 p50=370.4ms p95=399.8ms p99=399.8ms
-- `/api/v1/analysis/network`: n=10 p50=375.8ms p95=393.7ms p99=393.7ms
+- `/api/v1/analysis/email`: n=20 p50=589.1ms p95=2106.8ms p99=2106.8ms
+- `/api/v1/analysis/url`: n=20 p50=492.6ms p95=986.0ms p99=986.0ms
+- `/api/v1/analysis/account-takeover`: n=10 p50=615.0ms p95=1326.8ms p99=1326.8ms
+- `/api/v1/analysis/network`: n=10 p50=533.5ms p95=819.2ms p99=819.2ms
 
 ## Data provenance
 
 | Source | Mode | Rows | SHA256 | Fetched at |
 |---|---|---|---|---|
-| sms_spam | cache | 5572 | —… | 2026-09-13T19:39:36.463391+00:00 |
-| sms_spam | cache | 5572 | —… | 2026-09-13T19:39:39.449987+00:00 |
-| phishing_urls | cache | 300 | —… | 2026-09-13T19:39:42.524962+00:00 |
+| sms_spam | cache | 5572 | —… | 2026-09-15T16:12:04.328550+00:00 |
+| sms_spam | cache | 5572 | —… | 2026-09-15T16:12:05.626716+00:00 |
+| phishing_urls | cache | 300 | —… | 2026-09-15T16:12:07.084309+00:00 |
 
 ## Findings (bugs discovered by the harness — NOT fixed)
 

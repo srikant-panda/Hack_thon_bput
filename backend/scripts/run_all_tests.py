@@ -461,6 +461,14 @@ async def run_tests():
 
     await run_org_notification_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 21. ORG-5 — Realtime policy tightening (gated authenticated SELECT)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 21] ORG-5 — Realtime Policy Tightening")
+    from test_org_realtime_policies import run_realtime_policy_tests
+
+    await run_realtime_policy_tests(runner)
+
     return runner.report()
 
 

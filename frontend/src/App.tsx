@@ -17,6 +17,7 @@ import OrgMailServerLogs from './pages/OrgMailServerLogs';
 import OrgMailServerSettings from './pages/OrgMailServerSettings';
 import OrgNotifications from './pages/OrgNotifications';
 import OrgNotificationLog from './pages/OrgNotificationLog';
+import Docs from './pages/Docs';
 import AdminUsers from './pages/AdminUsers';
 import ComingSoon from './pages/ComingSoon';
 import EmailConnectors from './pages/EmailConnectors';
@@ -142,6 +143,7 @@ export default function App() {
           <Route path="/audit-logs" element={<WorkspaceGuard path="/audit-logs"><AuditLogs /></WorkspaceGuard>} />
           <Route path="/reports" element={<WorkspaceGuard path="/reports"><Reports /></WorkspaceGuard>} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/docs" element={<Docs />} />
           {/* ORG-1 foundation: always-on org endpoints (backend /orgs router) */}
           <Route path="/org/create" element={<OrganizationCreate />} />
           <Route path="/org/:orgId/settings" element={<OrganizationSettings />} />
