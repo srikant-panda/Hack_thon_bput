@@ -157,6 +157,15 @@ async def run_expiry_once() -> dict:
                 stats["blocks_expired"] += 1
             except (EmailProviderError, TokenRefreshError, RuntimeError) as exc:
                 block.last_error = f"{type(exc).__name__}: {getattr(exc, 'message', exc)}"
+                # An undecryptable stored token (CONNECTOR_TOKEN_KEY rotated) is
+                # permanently unrecoverable: mark the connector reauth_required
+                # so the UI shows "reconnect needed" and this pass stops
+                # retrying the same dead row every cycle.
+                if isinstance(exc, RuntimeError) and "cannot be decrypted" in str(exc):
+                    connector_row = await db.get(EmailConnectorAccount, block.connector_id)
+                    if connector_row is not None:
+                        connector_row.status = "reauth_required"
+                        connector_row.last_error = block.last_error
                 await db.commit()
                 stats["failures"] += 1
                 logger.warning("Block expiry failed for %s: %s", block.id, block.last_error)

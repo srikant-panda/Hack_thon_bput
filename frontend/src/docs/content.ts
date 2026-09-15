@@ -281,7 +281,17 @@ GET    /api/v1/enforcement/blocked-senders
 POST   /api/v1/enforcement/blocked-senders/{block_id}/release`,
         provenance: 'backend/app/api/routes_enforcement.py (transcription)',
       },
-      { kind: 'text', body: 'Honest limitations: permanent delete requires the per-connector setting permanent_delete_enabled (default false); quarantine expiry hours are per-connector (NULL = manual release only). The FP-hardening marketing regression set (10 digest/newsletter/transactional emails) must stay ≤ medium and fail the corroboration gate — review-recommended, no provider write.' },
+      {
+        kind: 'table',
+        headers: ['Enforcement outcome', 'Meaning', 'Provider effect'],
+        rows: [
+          ['auto-quarantine executed', 'Corroboration met: overall critical AND ≥2 engines at high+', 'Message moved to the CYBERGUARD label; security event "corroboration_met"'],
+          ['review_recommended', 'corroboration_missing — a single engine screamed while others shrugged', 'Zero provider writes; verdict is advisory, reason recorded in history + audit'],
+          ['skipped_trusted_sender', 'You previously released this sender — trust list overrides auto-enforcement', 'Scan still runs, verdict still shown; "sender is in your trust list — recommend-only"'],
+          ['skipped_auto_enforcement_disabled', 'Auto-enforcement switched off for the connector', 'Advisory only; nothing changed in the mailbox'],
+        ],
+      },
+      { kind: 'text', body: 'Honest limitations: permanent delete requires the per-connector setting permanent_delete_enabled (default false); quarantine expiry hours are per-connector (NULL = manual release only). The FP-hardening marketing regression set (10 digest/newsletter/transactional emails incl. the mediumday.com event-registration token URL) must stay ≤ medium and fail the corroboration gate — review-recommended, no provider write.' },
     ],
   },
   {
