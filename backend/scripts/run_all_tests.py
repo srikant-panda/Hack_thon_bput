@@ -477,7 +477,16 @@ async def run_tests():
 
     await run_rt_infrastructure_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 23. RT-2 — Real-time Pipeline Database Models (gmail_accounts, job_queue, processed_emails)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 23] RT-2 — Real-time Pipeline Database Models")
+    from test_rt_db_models import run_rt_db_models_tests
+
+    await run_rt_db_models_tests(runner)
+
     return runner.report()
+
 
 
 if __name__ == "__main__":

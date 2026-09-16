@@ -312,3 +312,10 @@ consequences. Newest entries at the bottom.
   webhook bursts cannot starve analysis pipelines, and allows independent horizontal
   scaling of analysis workers during high-volume threat bursts.
 
+- **2026-09-16 — RT-2: Real-time pipeline database models, job durability, and scan path separation (RT Phase).**
+  1. **Separation of `processed_emails` from `scan_results`:**
+     Manual scans (Phase 3) are stateless, user-initiated, on-demand operations that evaluate individual messages or drafts without inbox state tracking. In contrast, real-time push monitoring requires stateful ingestion tracking (history checkpoints, processing stages `received` -> `fetching` -> `fetched` -> `analyzing` -> `analyzed` -> `completed`, signal JSONB caches, and strict message-level idempotency via `UNIQUE(owner_user_id, gmail_message_id)`). Separating `processed_emails` ensures high-throughput ingestion never pollutes or destabilizes the manual audit records while preserving an optional foreign key (`scan_result_id`) when full threat scan artifacts are generated.
+  2. **Durable `job_queue` table alongside ephemeral Redis/Arq:**
+     Redis and Arq provide ultra-low latency, in-memory job coordination for worker dispatch, but in-memory queues are ephemeral: jobs can be evicted under memory pressure, dropped during Redis restarts, or obscured without auditable operational history. The PostgreSQL `job_queue` table acts as the authoritative source of truth for all worker jobs, recording deterministic job IDs, execution states, payloads, output results, retry counts, and exponential backoff retry schedules (`5s`, `30s`, `2m`, `10m`, `30m`). If Redis restarts or a worker crashes abruptly, the durable table allows unacknowledged or dead-letter jobs to be audited, re-enqueued, and inspected through RLS-isolated admin dashboards.
+
+

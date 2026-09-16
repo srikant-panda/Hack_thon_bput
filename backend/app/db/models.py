@@ -879,3 +879,214 @@ class TrustedSender(Base):
     # Why the trust entry exists, e.g. "released: <subject>" — shown in the UI.
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+
+
+class ScanResult(Base):
+    """Scan results for emails/items (real-time and manual scans)."""
+
+    __tablename__ = "scan_results"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(32), default="safe")
+    risk_score: Mapped[float] = mapped_column(Float, default=0.0)
+    scan_details: Mapped[Optional[dict[str, Any]]] = mapped_column(PortableJSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+
+
+class GmailAccount(Base):
+    """Connected Gmail account for real-time inbox monitoring."""
+
+    __tablename__ = "gmail_accounts"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "email", name="uq_gmail_accounts_owner_email"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    last_history_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    watch_expiration: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_status: Mapped[str] = mapped_column(String(32), default="active")  # 'active', 'paused', 'error'
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    # Relationships
+    processed_emails: Mapped[list["ProcessedEmail"]] = relationship(
+        "ProcessedEmail", back_populates="gmail_account", cascade="all, delete-orphan"
+    )
+
+    VALID_SYNC_TRANSITIONS = {
+        "active": {"paused", "error", "active"},
+        "paused": {"active", "error", "paused"},
+        "error": {"active", "error"},
+    }
+
+    def set_access_token(self, token: Optional[str]) -> None:
+        if token is None:
+            self.access_token_encrypted = None
+        else:
+            from app.core.crypto import encrypt_secret
+
+            self.access_token_encrypted = encrypt_secret(token)
+
+    def get_access_token(self) -> Optional[str]:
+        if not self.access_token_encrypted:
+            return None
+        from app.core.crypto import decrypt_secret
+
+        return decrypt_secret(self.access_token_encrypted)
+
+    def set_refresh_token(self, token: str) -> None:
+        from app.core.crypto import encrypt_secret
+
+        self.refresh_token_encrypted = encrypt_secret(token)
+
+    def get_refresh_token(self) -> str:
+        from app.core.crypto import decrypt_secret
+
+        return decrypt_secret(self.refresh_token_encrypted)
+
+    @classmethod
+    def can_transition_sync_status(cls_or_self, from_or_to: str, to_status: Optional[str] = None) -> bool:
+        if to_status is None:
+            if isinstance(cls_or_self, GmailAccount):
+                from_status = cls_or_self.sync_status
+                target_status = from_or_to
+            else:
+                return False
+        else:
+            from_status = from_or_to
+            target_status = to_status
+        return target_status in cls_or_self.VALID_SYNC_TRANSITIONS.get(from_status, set())
+
+
+class JobQueue(Base):
+    """Durable job queue state alongside Redis/Arq."""
+
+    __tablename__ = "job_queue"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    job_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=5)
+    payload: Mapped[dict[str, Any]] = mapped_column(PortableJSON, default=dict)
+    result: Mapped[Optional[dict[str, Any]]] = mapped_column(PortableJSON, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    def can_transition(
+        cls_or_self,
+        from_or_to: str,
+        to_status: Optional[str] = None,
+        retry_count: Optional[int] = None,
+        max_retries: Optional[int] = None,
+    ) -> bool:
+        if to_status is None:
+            if isinstance(cls_or_self, JobQueue):
+                from_status = cls_or_self.status
+                target_status = from_or_to
+                r_count = cls_or_self.retry_count if retry_count is None else retry_count
+                m_retries = cls_or_self.max_retries if max_retries is None else max_retries
+            else:
+                return False
+        else:
+            from_status = from_or_to
+            target_status = to_status
+            r_count = 0 if retry_count is None else retry_count
+            m_retries = 5 if max_retries is None else max_retries
+
+        if from_status == "queued":
+            return target_status == "running"
+        if from_status == "running":
+            if target_status == "completed":
+                return True
+            if target_status == "failed":
+                return r_count < m_retries
+            if target_status == "dead_letter":
+                return r_count >= m_retries
+            return False
+        if from_status == "failed":
+            if target_status == "queued":
+                return r_count < m_retries
+            if target_status == "dead_letter":
+                return r_count >= m_retries
+            return False
+        return False
+
+
+class ProcessedEmail(Base):
+    """Processed email record for real-time ingestion & idempotency."""
+
+    __tablename__ = "processed_emails"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "gmail_message_id", name="uq_processed_emails_owner_msg"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gmail_account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("gmail_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gmail_message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    subject: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sender: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(32), default="received")
+    risk_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    classification: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    signals: Mapped[Optional[dict[str, Any]]] = mapped_column(PortableJSON, nullable=True)
+    scan_result_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("scan_results.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, onupdate=_utc_now)
+
+    # Relationships
+    gmail_account: Mapped["GmailAccount"] = relationship("GmailAccount", back_populates="processed_emails")
+    scan_result: Mapped[Optional["ScanResult"]] = relationship("ScanResult")
+
+    VALID_TRANSITIONS = {
+        "received": {"fetching", "failed"},
+        "fetching": {"fetched", "failed"},
+        "fetched": {"analyzing", "failed"},
+        "analyzing": {"analyzed", "failed"},
+        "analyzed": {"completed", "failed"},
+        "failed": {"received", "fetching"},
+        "completed": set(),
+    }
+
+    @classmethod
+    def can_transition(cls_or_self, from_or_to: str, to_status: Optional[str] = None) -> bool:
+        if to_status is None:
+            if isinstance(cls_or_self, ProcessedEmail):
+                from_status = cls_or_self.processing_status
+                target_status = from_or_to
+            else:
+                return False
+        else:
+            from_status = from_or_to
+            target_status = to_status
+        return target_status in cls_or_self.VALID_TRANSITIONS.get(from_status, set())
+
