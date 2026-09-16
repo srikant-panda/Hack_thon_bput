@@ -22,6 +22,7 @@ from app.api import (
     routes_auth,
     routes_dashboard,
     routes_connectors,
+    routes_gmail_webhook,
     routes_enforcement,
     routes_db,
     routes_security_history,
@@ -115,6 +116,7 @@ app.include_router(routes_settings.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_security_history.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_security_history.review_router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_enforcement.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_gmail_webhook.router, prefix=settings.API_V1_PREFIX)
 
 # Register unified exception handlers
 register_error_handlers(app)

@@ -1,0 +1,89 @@
+"""Gmail Pub/Sub webhook endpoint with validation and thin enqueue."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from fastapi import APIRouter, Request
+from sqlalchemy import select
+
+from app.core.rate_limit import get_rate_limiter
+from app.db.admin import _get_admin_session_maker
+from app.db.models import GmailAccount, JobQueue
+from app.queue.client import enqueue, make_gmail_sync_job_id
+from app.services.gmail.pubsub_validator import validate_pubsub_message
+from app.services.idempotency_service import ensure_job
+
+logger = logging.getLogger("cyberguard.gmail_webhook")
+
+router = APIRouter(tags=["Gmail Webhook"])
+
+
+@router.post("/webhooks/gmail")
+async def gmail_pubsub_webhook(request: Request) -> dict[str, Any]:
+    """Receive Google Pub/Sub push notification for Gmail mailbox changes.
+
+    Thin webhook guarantees:
+    - Never fetches emails or calls Gmail API
+    - Never runs ML inference or scoring
+    - Never writes to processed_emails (only job_queue)
+    - Response time <50ms
+    """
+    # 1. Validate Pub/Sub push message structure, base64 data, and auth token
+    parsed = await validate_pubsub_message(request)
+    email_address = parsed["email_address"]
+    history_id = str(parsed["history_id"])
+
+    # 2. Lookup connected Gmail account (use admin session to query across tenants)
+    admin_session_maker = _get_admin_session_maker()
+    async with admin_session_maker() as db:
+        stmt = select(GmailAccount).where(GmailAccount.email == email_address)
+        account = (await db.execute(stmt)).scalar_one_or_none()
+
+        if account is None:
+            logger.warning("Pub/Sub notification received for unknown email: %s", email_address)
+            return {"status": "ignored", "reason": "unknown_email"}
+
+        # 3. If account sync is paused, acknowledge notification but skip enqueueing
+        if account.sync_status == "paused":
+            logger.info("Gmail account %s is paused; skipping sync enqueue", email_address)
+            return {"status": "ignored", "reason": "account_paused"}
+
+        # 4. Generate deterministic job ID
+        job_id = make_gmail_sync_job_id(account.owner_user_id, history_id)
+        payload = {
+            "account_id": account.id,
+            "history_id": history_id,
+        }
+
+        # 5. Check if job already exists in DB (idempotency check)
+        existing_stmt = select(JobQueue).where(JobQueue.job_id == job_id)
+        existing_job = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing_job is not None:
+            logger.info("Duplicate notification for job %s; returning existing job", job_id)
+            return {"status": "accepted", "job_id": job_id, "duplicate": True}
+
+        # 6. Apply rate limiting (defer by 5s if bucket exhausted)
+        limiter = get_rate_limiter()
+        defer_by = limiter.acquire(account.owner_user_id, "gmail_sync")
+        defer_seconds = defer_by if defer_by > 0 else None
+
+        # 7. Insert job into job_queue table
+        await ensure_job(
+            db,
+            owner_user_id=account.owner_user_id,
+            job_type="gmail_sync",
+            job_id=job_id,
+            payload=payload,
+        )
+
+    # 8. Enqueue to Redis/Arq worker
+    await enqueue(
+        "gmail_sync",
+        kwargs=payload,
+        job_id=job_id,
+        defer_by=defer_seconds,
+    )
+
+    return {"status": "accepted", "job_id": job_id}

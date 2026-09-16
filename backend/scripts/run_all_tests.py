@@ -485,7 +485,16 @@ async def run_tests():
 
     await run_rt_db_models_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 24. RT-3 — Gmail Pub/Sub Webhook (validation, thin enqueue, rate limit)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 24] RT-3 — Gmail Pub/Sub Webhook")
+    from test_gmail_webhook import run_gmail_webhook_tests
+
+    await run_gmail_webhook_tests(runner)
+
     return runner.report()
+
 
 
 

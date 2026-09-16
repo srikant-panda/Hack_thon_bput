@@ -318,4 +318,13 @@ consequences. Newest entries at the bottom.
   2. **Durable `job_queue` table alongside ephemeral Redis/Arq:**
      Redis and Arq provide ultra-low latency, in-memory job coordination for worker dispatch, but in-memory queues are ephemeral: jobs can be evicted under memory pressure, dropped during Redis restarts, or obscured without auditable operational history. The PostgreSQL `job_queue` table acts as the authoritative source of truth for all worker jobs, recording deterministic job IDs, execution states, payloads, output results, retry counts, and exponential backoff retry schedules (`5s`, `30s`, `2m`, `10m`, `30m`). If Redis restarts or a worker crashes abruptly, the durable table allows unacknowledged or dead-letter jobs to be audited, re-enqueued, and inspected through RLS-isolated admin dashboards.
 
+- **2026-09-16 — RT-3: Thin Gmail Pub/Sub push webhook with deterministic deduplication and rate limiting (RT Phase).**
+  1. **Why a thin webhook (<50ms response):**
+     Google Cloud Pub/Sub push subscriptions expect HTTP 200/201/204 acknowledgments within tight delivery deadlines (default 10s timeout, with automatic exponential retry on failure). Performing synchronous message retrieval from Gmail or running heavy ML pipelines inside the webhook handler would introduce catastrophic request queueing, timeouts, duplicate redeliveries, and server starvation under high-volume mailbox bursts. The webhook strictly performs token validation, base64 payload decoding, and non-blocking queue dispatch before immediately acknowledging HTTP 200.
+  2. **Why deterministic `job_id` (`gmail_sync:{owner_user_id}:{history_id}`):**
+     Pub/Sub push architecture is strictly at-least-once: network hiccups, gateway timeouts, or worker acknowledgment delays routinely deliver duplicate push events for the same mailbox event. Using a deterministic job ID guarantees distributed idempotency at both layers: Arq/Redis deduplicates against in-flight jobs, and PostgreSQL's `job_queue` table enforces a unique constraint that immediately returns the existing job without creating duplicate worker executions.
+  3. **Why token-bucket rate limiting (Gmail API quota protection):**
+     Google Cloud enforces strict per-user rate limits on Gmail API calls (250 requests/second/user). Sudden webhook bursts could trigger HTTP 429 quota exhaustion and cause transient sync failures. An in-memory token bucket per `(owner_user_id, "gmail_sync")` detects exhaustion and automatically enqueues jobs with a 5-second deferral (`defer_by=5s`), smoothing burst traffic while protecting API quota.
+
+
 

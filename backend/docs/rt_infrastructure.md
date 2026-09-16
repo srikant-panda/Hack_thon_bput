@@ -181,3 +181,18 @@ All settings can be specified via environment variables or `.env`:
 | `ARQ_MAX_JOBS` | `10` | Maximum concurrent jobs processed per worker process |
 | `ARQ_JOB_TIMEOUT` | `300` | Job execution timeout in seconds before abort |
 | `WORKER_CONCURRENCY` | `4` | Concurrency multiplier for worker thread/process scaling |
+| `GOOGLE_PUBSUB_VERIFICATION_TOKEN` | `""` | Verification token validating incoming Pub/Sub push messages |
+| `GMAIL_PUBSUB_TOPIC` | `projects/<project>/topics/cyberguard-gmail` | Google Cloud Pub/Sub topic for Gmail watch push notifications |
+| `GMAIL_PUBSUB_AUDIENCE` | `None` | Optional expected JWT audience for Google-signed push tokens |
+
+---
+
+## 8. Real-Time Webhook Ingestion (RT-3)
+
+CYBERGUARD provides a dedicated thin webhook endpoint (`POST /api/v1/webhooks/gmail`) for receiving Google Cloud Pub/Sub push notifications.
+
+- **Non-Blocking Ingestion**: The webhook validates the push message, decodes the history ID, applies user rate limiting, inserts an idempotent job record into `cyberguard.job_queue`, and enqueues to Redis in `<50ms`.
+- **Zero API or ML Overhead**: The webhook never calls Google APIs or runs ML models during request handling.
+- **Deduplication**: Push retries with identical history IDs are matched against deterministic job IDs (`gmail_sync:{user_id}:{history_id}`) and acknowledged without re-executing.
+- See [`gmail_webhook.md`](./gmail_webhook.md) for complete setup instructions, curl examples, and verification configuration.
+

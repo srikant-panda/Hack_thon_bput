@@ -29,12 +29,16 @@ class Settings(BaseSettings):
     # Organization accounts are frozen ("coming soon") until the Orgs Phase.
     ORG_ENABLED: bool = False
 
-    # Real-time pipeline infrastructure (RT-1)
+    # Real-time pipeline infrastructure (RT-1 / RT-3)
     REDIS_URL: str = "redis://localhost:6379"
     ARQ_QUEUE_NAME: str = "cyberguard_email"
     ARQ_MAX_JOBS: int = 10
     ARQ_JOB_TIMEOUT: int = 300
     WORKER_CONCURRENCY: int = 4
+    GOOGLE_PUBSUB_VERIFICATION_TOKEN: str = ""  # set via env; webhook validates this
+    GMAIL_PUBSUB_TOPIC: str = "projects/<your-project>/topics/cyberguard-gmail"
+    GMAIL_PUBSUB_AUDIENCE: str | None = None  # optional JWT audience
+
 
     # --- Email connectors (Phase 1-2): Gmail only; own Google OAuth client ---
     GOOGLE_GMAIL_CLIENT_ID: str = ""
