@@ -5,6 +5,7 @@ import { useUiStore } from '../../store/uiStore';
 import { useAuthStore } from '../../store/authStore';
 import * as api from '../../services/api';
 import { getNavSections, type NavItem } from '../../nav';
+import { useRealtimeEmailStore } from '../../hooks/useRealtimeEmails';
 
 function linkClass(isActive: boolean, collapsed: boolean) {
   return `flex items-center gap-3 border-l-2 py-2 pr-3 text-sm transition ${
@@ -24,6 +25,7 @@ export default function Sidebar() {
   const can = useAuthStore((s) => s.can);
   const isOrgWorkspace = Boolean(orgEnabled && activeOrganization && !activeOrganization.is_personal);
   const isAdmin = can('admin');
+  const liveEmailCount = useRealtimeEmailStore((s) => s.liveCount);
 
   // Pending-approval badge for the ORGANIZATION section (polled every 60s)
   const [pendingCount, setPendingCount] = useState<number | null>(null);
@@ -60,6 +62,11 @@ export default function Sidebar() {
           {!collapsed && to === '/approvals' && pendingCount !== null && pendingCount > 0 && (
             <span className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
               {pendingCount}
+            </span>
+          )}
+          {!collapsed && to === '/quarantine' && liveEmailCount > 0 && (
+            <span className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white animate-pulse">
+              {liveEmailCount}
             </span>
           )}
         </NavLink>

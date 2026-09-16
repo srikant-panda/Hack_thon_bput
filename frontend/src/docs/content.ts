@@ -550,6 +550,49 @@ POST   /api/v1/enforcement/blocked-senders/{block_id}/release`,
       { kind: 'text', body: 'All LLM providers down: explanations fall back to the deterministic synthesized path (heuristic + MITRE) — analysis, scoring, and enforcement continue uninterrupted; only the prose degrades. Rate-limited keys rotate and auto-recover after cooldown.' },
     ],
   },
+
+  // ===========================================================================
+  // 8. Real-time email pipeline & live UI
+  // ===========================================================================
+  {
+    id: 'realtime-emails',
+    title: 'Real-Time Email Pipeline & Live UI',
+    audience: 'both',
+    summary: 'Pub/Sub-driven asynchronous processing pipeline with Supabase Realtime broadcast and 60s polling fallback.',
+    body: [
+      {
+        kind: 'text',
+        body: 'The real-time pipeline connects Gmail webhook push notifications directly to autonomous detection workers and frontend interfaces. Upon new mail arrival, Gmail Pub/Sub triggers the webhook endpoint, which enqueues a discovery sync and fetch task in Arq Redis. The fetch worker extracts normalized MIME headers, text, and URLs, immediately enqueueing the analysis worker.',
+      },
+      {
+        kind: 'text',
+        body: 'Pipeline latency expectations: from the instant Gmail receives a message to the moment the UI Quarantine Queue receives the email_analyzed event is under 3 seconds (<3s end-to-end). Threat detection engines (heuristic phishing, ML XGBoost v2, lookalike impersonation, and SPF/DKIM/DMARC auth verification) execute asynchronously without blocking HTTP requests.',
+      },
+      {
+        kind: 'list',
+        items: [
+          'Webhook & sync discovery: Gmail push notification validated, history list diff processed, and message IDs discovered.',
+          'Fetch worker: Decrypts OAuth token, retrieves message payload with size limits, parses MIME parts, and normalizes email structure.',
+          'Analysis worker: Runs multi-engine heuristics, ML inference, applies monotonic blend scoring, stores ScanResult, and notifies clients.',
+          'Realtime broadcast: Dispatches email_analyzed payload to user-scoped Supabase Realtime channels (user:{userId}).',
+          'UI live update: In Quarantine Queue, new items prepend at the top with a highlight animation, critical arrivals auto-scroll into view if the user is near the top, and the sidebar badge increments immediately.',
+        ],
+      },
+      {
+        kind: 'text',
+        body: 'Graceful degradation & fallback behavior: if the Supabase Realtime websocket fails to connect or subscribe within 5 seconds (e.g. offline keys, network interruption, or local dev mode), the useRealtimeEmails hook seamlessly flips to a 60-second polling fallback. The UI switches the top-right status pill from green "LIVE" to amber "POLLING" with an explanatory tooltip. No disruptive error toasts are shown to the user, and data freshness is maintained automatically. Upon socket reconnect, the hook returns to realtime mode and clears the polling interval.',
+      },
+      {
+        kind: 'table',
+        headers: ['State', 'Trigger', 'Visual Indicator', 'Data Ingestion'],
+        rows: [
+          ['Connected (Realtime)', 'Supabase channel subscription SUBSCRIBED', 'Green dot LIVE pill', 'Instant push via broadcast event (<3s)'],
+          ['Degraded (Polling)', 'Connection timeout (>5s) or CHANNEL_ERROR', 'Amber dot POLLING pill', 'Background interval fetch every 60s'],
+          ['Demo / Mock Mode', 'VITE_USE_MOCK=true', 'Amber DEMO pill', 'Manual user scan trigger only'],
+        ],
+      },
+    ],
+  },
 ];
 
 /** Flat anchor id list — the docs page and the check script both use this. */

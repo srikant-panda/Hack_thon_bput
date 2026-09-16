@@ -17,6 +17,11 @@ import VerboseResultPanel, { SEVERITY_STYLES } from '../components/common/Verbos
 import * as api from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import type { QuarantineReview, QuarantinedItem } from '../types';
+import {
+  useRealtimeEmails,
+  shouldAutoScrollToTop,
+  type EmailAnalyzedPayload,
+} from '../hooks/useRealtimeEmails';
 
 const STATUS_STYLES: Record<string, string> = {
   quarantined: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/30',
@@ -41,6 +46,7 @@ export default function QuarantineQueue() {
   const [selected, setSelected] = useState<QuarantinedItem | null>(null);
   const [review, setReview] = useState<QuarantineReview | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,9 +60,61 @@ export default function QuarantineQueue() {
     }
   }, []);
 
+  const handleRealtimeEmail = useCallback(
+    (event: EmailAnalyzedPayload) => {
+      // Build real-time row matching the QuarantinedItem shape
+      const newItem: QuarantinedItem = {
+        id: event.processed_email_id,
+        connector_id: 'gmail',
+        provider_message_id: event.processed_email_id,
+        sender_email: event.sender || 'Analyzing sender...',
+        reason: event.classification || 'email_analyzed',
+        severity: (event.severity || (event.risk_score >= 0.8 ? 'critical' : event.risk_score >= 0.5 ? 'high' : 'medium')) as string,
+        scan_result: event.scan_result_id
+          ? ({
+              id: event.scan_result_id,
+              subject: event.subject || 'Threat Analysis Completed',
+              verdict: event.severity || event.classification || 'phishing',
+              score: Math.round((event.risk_score || 0) * 100),
+              indicators: [],
+              mitre_attack_tags: [],
+            } as any)
+          : null,
+        quarantined_at: event.analyzed_at || new Date().toISOString(),
+        expires_at: null,
+        status: 'quarantined',
+        last_error: null,
+      };
+
+      // Insert at top with highlight animation
+      setItems((prev) => [newItem, ...prev.filter((i) => i.id !== newItem.id)]);
+      setHighlightedId(event.processed_email_id);
+      setTimeout(() => {
+        setHighlightedId((curr) => (curr === event.processed_email_id ? null : curr));
+      }, 3500);
+
+      // Auto-scroll-to-top on new critical arrival (respect user scroll — only if near top)
+      if (typeof window !== 'undefined' && shouldAutoScrollToTop(event, window.scrollY)) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [],
+  );
+
+  const { isConnected, isPolling, resetLiveCount } = useRealtimeEmails({
+    onEvent: handleRealtimeEmail,
+    onRefresh: async () => {
+      await load();
+      resetLiveCount();
+    },
+    enabled: true,
+  });
+
   useEffect(() => {
-    load();
-  }, [load]);
+    load().then(() => {
+      resetLiveCount();
+    });
+  }, [load, resetLiveCount]);
 
   const openReview = useCallback(async (item: QuarantinedItem) => {
     setSelected(item);
@@ -161,6 +219,40 @@ export default function QuarantineQueue() {
       <PageHeader
         title="Quarantine Queue"
         description="Messages quarantined at Gmail by auto-enforcement. Release returns them to the inbox; delete trashes or permanently removes them per your connector settings."
+        actions={
+          <div className="flex items-center gap-2">
+            {isMockMode ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                <span className="h-2 w-2 rounded-full bg-amber-400" />
+                DEMO
+              </span>
+            ) : isConnected ? (
+              <span
+                title="Supabase Realtime subscription active"
+                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-400"
+              >
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE
+              </span>
+            ) : isPolling ? (
+              <span
+                title="Realtime disconnected; polling fallback active (refreshes every 60s)"
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300"
+              >
+                <span className="h-2 w-2 rounded-full bg-amber-400" />
+                POLLING
+              </span>
+            ) : (
+              <span
+                title="Connecting to realtime pipeline..."
+                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-800/60 px-2.5 py-1 text-xs font-semibold text-zinc-400"
+              >
+                <span className="h-2 w-2 rounded-full bg-zinc-500 animate-ping" />
+                CONNECTING
+              </span>
+            )}
+          </div>
+        }
       />
 
       {isMockMode && (
@@ -246,24 +338,38 @@ export default function QuarantineQueue() {
           </div>
         ) : (
           <div className="divide-y divide-zinc-800">
-            {[...activeItems, ...pastItems].map((item) => (
-              <div key={item.id} className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${
-                        SEVERITY_STYLES[item.severity] ?? SEVERITY_STYLES.safe
-                      }`}
-                    >
-                      {item.severity}
-                    </span>
-                    <span className="truncate text-sm font-semibold text-zinc-100">
-                      {item.scan_result?.subject || '(no subject)'}
-                    </span>
-                    <span className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${STATUS_STYLES[item.status] ?? STATUS_STYLES.deleted}`}>
-                      {item.status}
-                    </span>
-                  </div>
+            {[...activeItems, ...pastItems].map((item) => {
+              const isHighlighted = item.id === highlightedId;
+              return (
+                <div
+                  key={item.id}
+                  className={`flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between transition-colors duration-1000 ${
+                    isHighlighted ? 'bg-red-500/15 ring-1 ring-inset ring-red-500/40' : ''
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!item.scan_result ? (
+                        <span className="flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-400 ring-1 ring-amber-500/30 animate-pulse">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Analyzing...
+                        </span>
+                      ) : (
+                        <span
+                          className={`rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${
+                            SEVERITY_STYLES[item.severity] ?? SEVERITY_STYLES.safe
+                          }`}
+                        >
+                          {item.severity}
+                        </span>
+                      )}
+                      <span className="truncate text-sm font-semibold text-zinc-100">
+                        {item.scan_result?.subject || '(no subject)'}
+                      </span>
+                      <span className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${STATUS_STYLES[item.status] ?? STATUS_STYLES.deleted}`}>
+                        {item.status}
+                      </span>
+                    </div>
                   <p className="mt-1 font-mono text-[11px] text-zinc-500">
                     From {item.sender_email} · quarantined {formatWhen(item.quarantined_at)} · expires{' '}
                     {item.expires_at ? formatWhen(item.expires_at) : 'manual'}
@@ -312,7 +418,8 @@ export default function QuarantineQueue() {
                   )}
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         )}
       </div>
