@@ -25,5 +25,6 @@ cron_jobs = [
 class WorkerSettings(BaseWorkerSettings):
     """Worker settings for CYBERGUARD scheduled cron operations."""
 
+    queue_name: str = "cyberguard_scheduler"
     cron_jobs = cron_jobs
     functions: list[Any] = [renew_watches, reconcile_stuck_accounts]
