@@ -469,6 +469,14 @@ async def run_tests():
 
     await run_realtime_policy_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 22. RT-1 — Real-time Pipeline Infrastructure (Redis, Arq, Docker, workers)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 22] RT-1 — Real-time Pipeline Infrastructure")
+    from test_rt_infrastructure import run_rt_infrastructure_tests
+
+    await run_rt_infrastructure_tests(runner)
+
     return runner.report()
 
 

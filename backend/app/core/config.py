@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Organization accounts are frozen ("coming soon") until the Orgs Phase.
     ORG_ENABLED: bool = False
 
+    # Real-time pipeline infrastructure (RT-1)
+    REDIS_URL: str = "redis://localhost:6379"
+    ARQ_QUEUE_NAME: str = "cyberguard_email"
+    ARQ_MAX_JOBS: int = 10
+    ARQ_JOB_TIMEOUT: int = 300
+    WORKER_CONCURRENCY: int = 4
+
     # --- Email connectors (Phase 1-2): Gmail only; own Google OAuth client ---
     GOOGLE_GMAIL_CLIENT_ID: str = ""
     GOOGLE_GMAIL_CLIENT_SECRET: str = ""

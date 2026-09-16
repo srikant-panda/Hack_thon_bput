@@ -299,3 +299,16 @@ consequences. Newest entries at the bottom.
   branch for alerts; clean no-op on SQLite/vanilla PG where auth.uid()
   does not exist. Realtime subscribers now stream only rows the calling
   user is entitled to — the demo tradeoff recorded at ORG-2 is closed.
+
+- **2026-09-16 — RT-1: Real-time pipeline infrastructure with Redis + Arq; worker separation (RT Phase).**
+  Arq selected over Celery as the distributed task queue: Arq is asyncio-native
+  from the ground up, fitting FastAPI's async runtime, SQLAlchemy 2.0 async
+  sessions, and asyncpg/aiosqlite without requiring threadpools, kombu, or
+  AMQP broker overhead; it introduces only `arq` and `redis` with zero bloat.
+  Workers are explicitly split into `gmail-worker` and `email-worker`:
+  Gmail ingestion is I/O-bound and bounded by Google OAuth rate limits, whereas
+  email threat analysis, ML scoring (XGBoost/TF-IDF), and SOAR enforcement are
+  compute/memory-heavy. Isolating them ensures external Gmail quota pressure or
+  webhook bursts cannot starve analysis pipelines, and allows independent horizontal
+  scaling of analysis workers during high-volume threat bursts.
+

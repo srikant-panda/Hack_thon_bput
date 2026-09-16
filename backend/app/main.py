@@ -84,6 +84,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health, readiness, and metrics probes (root & API prefix)
+app.include_router(routes_health.router)
+
 # Register API routers under /api/v1
 app.include_router(routes_health.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_notifications.router, prefix=settings.API_V1_PREFIX)
