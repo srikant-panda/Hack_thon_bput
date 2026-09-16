@@ -896,6 +896,22 @@ class ScanResult(Base):
     scan_details: Mapped[Optional[dict[str, Any]]] = mapped_column(PortableJSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
+    @property
+    def indicators(self) -> list[dict[str, Any]]:
+        return (self.scan_details or {}).get("indicators", [])
+
+    @property
+    def explanation(self) -> str:
+        return (self.scan_details or {}).get("explanation", "")
+
+    @property
+    def severity(self) -> str:
+        return (self.scan_details or {}).get("severity", self.verdict)
+
+    @property
+    def engine_results(self) -> dict[str, Any]:
+        return (self.scan_details or {}).get("engine_results", {})
+
 
 class GmailAccount(Base):
     """Connected Gmail account for real-time inbox monitoring."""

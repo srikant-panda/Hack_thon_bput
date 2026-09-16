@@ -113,8 +113,8 @@ async def run_realtime_policy_tests(runner) -> None:
                 {"id": user_a},
             )
             await db.execute(text(
-                "insert into cyberguard.organizations (id, name, slug, is_personal, owner_id, created_at) "
-                "values (:id, :n, :s, false, :u, now())"),
+                "insert into cyberguard.organizations (id, name, slug, is_personal, owner_id, status, created_at) "
+                "values (:id, :n, :s, false, :u, 'active', now())"),
                 {"id": org_a, "n": "RT Org A", "s": f"rt-a-{stamp}", "u": user_a},
             )
             await db.execute(text(

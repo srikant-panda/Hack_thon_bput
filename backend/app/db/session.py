@@ -27,10 +27,12 @@ is_sqlite = "sqlite" in settings.async_database_url
 if is_sqlite:
     connect_args["check_same_thread"] = False
     connect_args["timeout"] = 30
+else:
+    # On PostgreSQL, ensure the app engine operates as the cyberguard_api app role (NOBYPASSRLS)
+    # so that Row-Level Security policies are strictly enforced even if DATABASE_URL
+    # was configured using a superuser account (e.g. postgres:postgres in local dev).
+    connect_args["server_settings"] = {"role": "cyberguard_api"}
 
-# SQLite has no schema support: every "cyberguard"-qualified table resolves to
-# the default schema so the test suite runs unchanged. PostgreSQL uses the real
-# dedicated schema.
 engine_options = {}
 if is_sqlite:
     engine_options["execution_options"] = {"schema_translate_map": {SCHEMA: None}}
@@ -213,8 +215,12 @@ async def _ensure_schema_if_privileged(schema: str) -> None:
     database (e.g. the cyberguard_api app role — alembic owns schema creation
     there). Any other failure is logged without breaking startup.
     """
+    admin_url = settings.MIGRATION_DATABASE_URL or settings.DATABASE_URL
+    if not admin_url or "postgresql" not in admin_url:
+        return
+    admin_engine = create_async_engine(admin_url)
     try:
-        async with engine.connect() as conn:
+        async with admin_engine.connect() as conn:
             has_create = (
                 await conn.execute(
                     text("select has_database_privilege(current_user, current_database(), 'CREATE')")
@@ -228,9 +234,60 @@ async def _ensure_schema_if_privileged(schema: str) -> None:
                 )
                 return
             await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-        logger.info("ensured schema '%s' exists", schema)
+            # Emulate Supabase auth schema and auth.uid() on local/vanilla Postgres for 100% parity
+            await conn.execute(text('CREATE SCHEMA IF NOT EXISTS "auth"'))
+            await conn.execute(text("""
+                CREATE OR REPLACE FUNCTION auth.uid() RETURNS text AS $$
+                    SELECT coalesce(
+                        nullif(current_setting('request.jwt.claim.sub', true), ''),
+                        nullif(current_setting('app.user_id', true), '')
+                    );
+                $$ LANGUAGE sql STABLE;
+            """))
+            # Ensure cyberguard_api role exists with NOBYPASSRLS for local PostgreSQL
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cyberguard_api') THEN
+                        CREATE ROLE cyberguard_api WITH LOGIN NOBYPASSRLS PASSWORD 'cyberguard_api';
+                    END IF;
+                END $$;
+            """))
+            # Grant privileges to cyberguard_api
+            await conn.execute(text(f'GRANT USAGE, CREATE ON SCHEMA "{schema}" TO cyberguard_api;'))
+            await conn.execute(text(f'GRANT ALL ON ALL TABLES IN SCHEMA "{schema}" TO cyberguard_api;'))
+            await conn.execute(text(f'GRANT ALL ON ALL SEQUENCES IN SCHEMA "{schema}" TO cyberguard_api;'))
+            await conn.execute(text(f'GRANT ALL ON ALL FUNCTIONS IN SCHEMA "{schema}" TO cyberguard_api;'))
+            await conn.execute(text(f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT ALL ON TABLES TO cyberguard_api;'))
+            await conn.execute(text(f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT ALL ON SEQUENCES TO cyberguard_api;'))
+            await conn.execute(text(f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT ALL ON FUNCTIONS TO cyberguard_api;'))
+            await conn.execute(text('GRANT USAGE ON SCHEMA auth TO cyberguard_api, public;'))
+            await conn.execute(text('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO cyberguard_api, public;'))
+            # Ensure realtime publication exists and contains org_log_events & alerts
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+                        CREATE PUBLICATION supabase_realtime;
+                    END IF;
+                END $$;
+            """))
+            for tbl in ("org_log_events", "alerts"):
+                await conn.execute(text(f"""
+                    DO $$
+                    BEGIN
+                        ALTER PUBLICATION supabase_realtime ADD TABLE "{schema}".{tbl};
+                    EXCEPTION WHEN duplicate_object THEN
+                        NULL;
+                    END $$;
+                """))
+            await conn.execute(text(f'ALTER TABLE IF EXISTS "{schema}".organizations ALTER COLUMN status SET DEFAULT \'active\''))
+            await conn.commit()
+        logger.info("ensured schema '%s' and auth compatibility exist", schema)
     except Exception as exc:  # noqa: BLE001 - never block startup on the bootstrap
         logger.warning("could not ensure schema '%s' (run alembic upgrade head): %s", schema, exc)
+    finally:
+        await admin_engine.dispose()
 
 
 async def init_db() -> None:

@@ -54,6 +54,8 @@ def _resolve_urls():
         return None, None
     if "postgresql+asyncpg" not in app_url:
         return None, None
+    if "postgres:postgres@" in app_url:
+        app_url = app_url.replace("postgres:postgres@", "cyberguard_api:cyberguard_api@")
     return service_url, app_url
 
 

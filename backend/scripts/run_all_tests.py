@@ -509,6 +509,14 @@ async def run_tests():
 
     await run_email_fetch_worker_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 27. RT-6 — Email Analysis Worker (phishing/URL/impersonation/ATO engines + ML inference + result persistence)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 27] RT-6 — Email Analysis Worker")
+    from test_email_analysis_worker import run_email_analysis_worker_tests
+
+    await run_email_analysis_worker_tests(runner)
+
     return runner.report()
 
 
