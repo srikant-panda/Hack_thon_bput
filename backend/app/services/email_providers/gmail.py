@@ -387,9 +387,15 @@ class GmailProvider:
 
     async def release_message(self, access_token: str, message_id: str, quarantine_label: str) -> dict:
         """Return a quarantined message to the inbox."""
-        return await self.modify_message(
-            access_token, message_id, add_label_ids=["INBOX"], remove_label_ids=[quarantine_label]
-        )
+        try:
+            return await self.modify_message(
+                access_token, message_id, add_label_ids=["INBOX"], remove_label_ids=[quarantine_label]
+            )
+        except EmailProviderError as exc:
+            if exc.provider_code == "404" or "404" in str(exc.message):
+                logger.info("Message %s was already removed/deleted in Gmail (HTTP 404); treating as success", message_id)
+                return {"released": True, "already_removed": True}
+            raise
 
     async def move_to_trash(self, access_token: str, message_id: str) -> dict:
         """Move a message to Gmail trash."""
@@ -399,10 +405,16 @@ class GmailProvider:
 
     async def delete_message(self, access_token: str, message_id: str, permanent: bool) -> dict:
         """Trash the message, or permanently delete when permitted+enabled."""
-        if permanent:
-            await self._request("DELETE", f"{GMAIL_API_BASE}/users/me/messages/{message_id}", access_token)
-            return {"deleted": True, "permanent": True}
-        return await self.move_to_trash(access_token, message_id)
+        try:
+            if permanent:
+                await self._request("DELETE", f"{GMAIL_API_BASE}/users/me/messages/{message_id}", access_token)
+                return {"deleted": True, "permanent": True}
+            return await self.move_to_trash(access_token, message_id)
+        except EmailProviderError as exc:
+            if exc.provider_code == "404" or "404" in str(exc.message):
+                logger.info("Message %s was already deleted in Gmail (HTTP 404); treating as success", message_id)
+                return {"deleted": True, "permanent": permanent, "already_deleted": True}
+            raise
 
     async def create_sender_rule(self, access_token: str, sender_email: str, target_label: str) -> dict:
         """Create a Gmail filter auto-quarantining future mail from the sender.
@@ -421,9 +433,15 @@ class GmailProvider:
         )
 
     async def delete_sender_rule(self, access_token: str, rule_id: str) -> dict:
-        await self._request(
-            "DELETE", f"{GMAIL_API_BASE}/users/me/settings/filters/{rule_id}", access_token
-        )
+        try:
+            await self._request(
+                "DELETE", f"{GMAIL_API_BASE}/users/me/settings/filters/{rule_id}", access_token
+            )
+        except EmailProviderError as exc:
+            if exc.provider_code == "404" or "404" in str(exc.message):
+                logger.info("Filter %s was already deleted in Gmail (HTTP 404); treating as success", rule_id)
+                return {"deleted": True, "rule_id": rule_id, "already_deleted": True}
+            raise
         return {"deleted": True, "rule_id": rule_id}
 
     async def close(self) -> None:

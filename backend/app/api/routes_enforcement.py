@@ -206,9 +206,12 @@ async def release_quarantined(
         label_id = await gmail_provider.ensure_quarantine_label(token)
         await gmail_provider.release_message(token, item.provider_message_id, label_id)
     except (EmailProviderError, TokenRefreshError) as exc:
-        item.last_error = f"{getattr(exc, 'error_class', 'api_error')}: {getattr(exc, 'message', exc)}"
-        await db.commit()
-        raise _provider_error(exc) from exc
+        if "404" in str(getattr(exc, "message", exc)):
+            logger.info("Quarantined message %s was already moved/deleted in Gmail (HTTP 404); marking released", item.provider_message_id)
+        else:
+            item.last_error = f"{getattr(exc, 'error_class', 'api_error')}: {getattr(exc, 'message', exc)}"
+            await db.commit()
+            raise _provider_error(exc) from exc
 
     item.status = "released"
     item.last_error = None
@@ -429,9 +432,12 @@ async def delete_quarantined(
         token = await get_valid_access_token(connector, db)
         await gmail_provider.delete_message(token, item.provider_message_id, permanent=permanent)
     except (EmailProviderError, TokenRefreshError) as exc:
-        item.last_error = f"{getattr(exc, 'error_class', 'api_error')}: {getattr(exc, 'message', exc)}"
-        await db.commit()
-        raise _provider_error(exc) from exc
+        if "404" in str(getattr(exc, "message", exc)):
+            logger.info("Quarantined message %s was already deleted in Gmail (HTTP 404); marking deleted in DB", item.provider_message_id)
+        else:
+            item.last_error = f"{getattr(exc, 'error_class', 'api_error')}: {getattr(exc, 'message', exc)}"
+            await db.commit()
+            raise _provider_error(exc) from exc
 
     item.status = "deleted"
     item.last_error = None
@@ -506,6 +512,17 @@ async def list_blocked_senders(
             .order_by(BlockedSender.blocked_at.desc())
         )
     ).scalars().all()
+
+    # If any blocked sender had failed with 404 because the filter was manually removed in Gmail, auto-heal to released
+    updated_any = False
+    for b in blocks:
+        if b.status == "blocked" and b.last_error and "404" in b.last_error:
+            b.status = "released"
+            b.last_error = None
+            updated_any = True
+    if updated_any:
+        await db.commit()
+
     return BlockedSenderListResponse(items=[_serialize_block(b) for b in blocks])
 
 
@@ -535,9 +552,12 @@ async def release_blocked_sender(
             # Rule creation had failed earlier; nothing to remove at Google.
             pass
     except (EmailProviderError, TokenRefreshError) as exc:
-        block.last_error = f"{getattr(exc, 'error_class', 'api_error')}: {getattr(exc, 'message', exc)}"
-        await db.commit()
-        raise _provider_error(exc) from exc
+        if "404" in str(getattr(exc, "message", exc)):
+            logger.info("Filter %s for %s was already removed in Gmail (HTTP 404); unblocking in DB", block.provider_rule_id, block.sender_email)
+        else:
+            block.last_error = f"{getattr(exc, 'error_class', 'api_error')}: {getattr(exc, 'message', exc)}"
+            await db.commit()
+            raise _provider_error(exc) from exc
 
     block.status = "released"
     block.last_error = None
