@@ -109,6 +109,7 @@ class WorkerSettings:
     retry_jobs: bool = True
     max_tries: int = 3
     functions: list[Any] = []
+    cron_jobs: list[Any] = []
 
     on_startup = base_startup
     on_shutdown = base_shutdown

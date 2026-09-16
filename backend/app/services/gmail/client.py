@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
@@ -169,4 +170,35 @@ class GmailClient:
         if timeout is not None:
             req_kwargs["timeout"] = timeout
         return await self._request("GET", url, access_token, refresh_token=refresh_token, **req_kwargs)
+
+    async def watch(
+        self,
+        access_token: str,
+        topic: str,
+        labels: Optional[list[str]] = None,
+        refresh_token: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Call POST https://gmail.googleapis.com/gmail/v1/users/me/watch.
+
+        Registers Gmail mailbox push notifications to the configured Google Cloud Pub/Sub topic.
+        Returns dict with historyId and expiration timestamp (epoch milliseconds).
+        """
+        url = f"{GMAIL_API_BASE}/users/me/watch"
+        payload: dict[str, Any] = {
+            "topicName": topic,
+            "labelIds": labels if labels is not None else ["INBOX"],
+        }
+        return await self._request("POST", url, access_token, refresh_token=refresh_token, json=payload)
+
+    async def stop_watch(
+        self,
+        access_token: str,
+        refresh_token: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Call POST https://gmail.googleapis.com/gmail/v1/users/me/stop.
+
+        Stops Gmail mailbox push notifications for the authenticated user.
+        """
+        url = f"{GMAIL_API_BASE}/users/me/stop"
+        return await self._request("POST", url, access_token, refresh_token=refresh_token)
 

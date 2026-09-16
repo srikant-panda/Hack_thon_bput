@@ -517,6 +517,14 @@ async def run_tests():
 
     await run_email_analysis_worker_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 28. RT-8 — Watch renewal + reconciliation scheduled workers
+    # -----------------------------------------------------------------------
+    print("\n[Suite 28] RT-8 — Scheduled Workers (Watch Renewal & Reconciliation)")
+    from test_scheduled_workers import run_scheduled_workers_tests
+
+    await run_scheduled_workers_tests(runner)
+
     return runner.report()
 
 

@@ -35,6 +35,12 @@ services:
     depends_on: [redis, postgres]
     environment: [REDIS_URL=redis://redis:6379]
     volumes: [".:/app"]
+  scheduler-worker:
+    build: .
+    command: uv run arq app.workers.scheduler_worker.WorkerSettings
+    depends_on: [redis, postgres]
+    environment: [REDIS_URL=redis://redis:6379]
+    volumes: [".:/app"]
 volumes:
   redis-data:
   postgres-data:
