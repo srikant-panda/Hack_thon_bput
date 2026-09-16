@@ -222,24 +222,48 @@ gracefully when an artifact is missing.
 
 ## 10. Real-Time Pipeline Startup (RT-1..RT-10)
 
+> 📖 **For a beginner-friendly, step-by-step setup guide covering Google Cloud Console, OAuth, Pub/Sub, and Cloudflare tunnels**, see [REALTIME_GMAIL_SETUP_GUIDE.md](realtime_gmail_setup.md).
+
 The real-time ingestion pipeline consists of a thin webhook receiver (<50ms response), Redis/Arq distributed queues, and 3 specialized background worker pools (`gmail-worker`, `email-worker`, `scheduler-worker`).
 
-### Condition A: Docker Compose (All-in-One Local Deployment)
+### Condition A: Full Production Docker Stack (All-in-One Containerized Deployment)
 
-Runs PostgreSQL, Redis, FastAPI backend, all 3 background workers, and static frontend inside a unified network.
+Runs PostgreSQL, Redis, FastAPI backend, all 3 background workers (`gmail-worker`, `email-worker`, `scheduler-worker`), the built React SPA frontend, pgAdmin 4, and RedisInsight:
 
 ```bash
 # From repository root:
+docker compose -f docker-compose.prod.yml up -d --build
+# Or simply:
 docker compose up -d --build
 
 # Verify all services are healthy:
 docker compose ps
-# Expected services: postgres, redis, api, gmail-worker, email-worker, scheduler-worker, frontend
+
+# Web Services:
+#   Frontend SPA : http://localhost:3000
+#   FastAPI Docs : http://localhost:8000/docs
+#   pgAdmin 4    : http://localhost:5050  (admin@cyberguard.org / admin)
+#   RedisInsight : http://localhost:5540
 ```
 
-### Condition B: Hybrid Deployment (Supabase Cloud + Local Redis + 4 Terminals)
+### Condition B: Dependencies-Only (Postgres + Redis + pgAdmin + RedisInsight)
 
-Connects to Supabase Cloud PostgreSQL while running local asynchronous workers and FastAPI dev servers.
+Runs **only** the infrastructure dependencies in Docker while you develop and run the backend, workers, and frontend directly on your local machine:
+
+```bash
+# Start infrastructure dependencies:
+docker compose -f docker-compose.deps.yml up -d
+
+# Verify dependencies are healthy:
+docker compose -f docker-compose.deps.yml ps
+# Services running:
+#   PostgreSQL   : localhost:5432 (User: postgres, Password: postgres, DB: cyberguard)
+#   Redis        : localhost:6379
+#   pgAdmin 4    : http://localhost:5050  (admin@cyberguard.org / admin)
+#   RedisInsight : http://localhost:5540
+```
+
+Then run your local processes:
 
 ```bash
 # Ensure local Redis is listening on 127.0.0.1:6379

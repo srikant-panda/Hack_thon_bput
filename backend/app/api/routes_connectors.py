@@ -12,11 +12,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AppError, NotFoundError, PermissionDeniedError
 from app.core.security import CurrentUser, get_current_user
+from app.db.models import JobQueue, ProcessedEmail
 from app.db.session import get_db
 from app.schemas.connectors import (
     ConnectorAccountRead,
@@ -331,3 +333,122 @@ async def get_message_analysis(
         raise _provider_error(exc) from exc
     scan_result = await scan_message(message)
     return {"scan": scan_result, "message": message}
+
+
+class ProcessedEmailItem(BaseModel):
+    id: str
+    gmail_message_id: str
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+    received_at: Optional[datetime] = None
+    processing_status: str
+    risk_score: Optional[float] = None
+    classification: Optional[str] = None
+    enforcement_status: Optional[str] = None
+    enforcement_detail: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class IngestionActivityResponse(BaseModel):
+    connected_mailboxes: list[dict]
+    recent_emails: list[ProcessedEmailItem]
+    recent_jobs: list[dict]
+    summary: dict
+
+
+@router.get("/activity", response_model=IngestionActivityResponse)
+async def get_ingestion_activity(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> IngestionActivityResponse:
+    """Fetch live mailbox ingestion, threat analysis, and enforcement activity."""
+    # 1. Connected mailboxes
+    connectors = await connector_service.list_connectors(db, user.id)
+    connected_mailboxes = [
+        {
+            "id": c.id,
+            "email": c.provider_email,
+            "provider": c.provider,
+            "status": c.status,
+            "last_sync_at": c.last_sync_at,
+            "last_error": c.last_error,
+        }
+        for c in connectors
+    ]
+
+    # 2. Recent ProcessedEmails
+    pe_query = (
+        select(ProcessedEmail)
+        .where(ProcessedEmail.owner_user_id == user.id)
+        .order_by(ProcessedEmail.created_at.desc())
+        .limit(limit)
+    )
+    pe_rows = (await db.execute(pe_query)).scalars().all()
+
+    recent_emails = []
+    total_phishing = 0
+    total_quarantined = 0
+    for pe in pe_rows:
+        signals = pe.signals or {}
+        enf_status = signals.get("enforcement_status")
+        enf_detail = signals.get("enforcement_detail")
+        if not enf_status and pe.classification == "phishing":
+            enf_status = "quarantined"
+        elif not enf_status and pe.processing_status == "completed":
+            enf_status = "clean"
+
+        if pe.classification == "phishing" or (pe.risk_score or 0) >= 0.7:
+            total_phishing += 1
+        if enf_status in ("quarantined", "success"):
+            total_quarantined += 1
+
+        recent_emails.append(
+            ProcessedEmailItem(
+                id=pe.id,
+                gmail_message_id=pe.gmail_message_id,
+                sender=pe.sender,
+                subject=pe.subject,
+                received_at=pe.received_at,
+                processing_status=pe.processing_status,
+                risk_score=pe.risk_score,
+                classification=pe.classification,
+                enforcement_status=enf_status,
+                enforcement_detail=enf_detail,
+                created_at=pe.created_at,
+                updated_at=pe.updated_at,
+            )
+        )
+
+    # 3. Recent JobQueue items
+    jq_query = (
+        select(JobQueue)
+        .where(JobQueue.owner_user_id == user.id)
+        .order_by(JobQueue.created_at.desc())
+        .limit(limit)
+    )
+    jq_rows = (await db.execute(jq_query)).scalars().all()
+    recent_jobs = [
+        {
+            "id": j.id,
+            "job_id": j.job_id,
+            "job_type": j.job_type,
+            "status": j.status,
+            "error": j.error,
+            "created_at": j.created_at,
+            "updated_at": j.updated_at,
+        }
+        for j in jq_rows
+    ]
+
+    return IngestionActivityResponse(
+        connected_mailboxes=connected_mailboxes,
+        recent_emails=recent_emails,
+        recent_jobs=recent_jobs,
+        summary={
+            "total_processed": len(pe_rows),
+            "threats_detected": total_phishing,
+            "quarantined": total_quarantined,
+        },
+    )

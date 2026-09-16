@@ -71,7 +71,17 @@ def extract_unique_message_ids(history_data: Any) -> list[str]:
                     elif "id" in entry:
                         _add(entry["id"])
 
-        # 2. messages list
+        # 2. labelsAdded list (e.g. INBOX label added)
+        if "labelsAdded" in item and isinstance(item["labelsAdded"], list):
+            for entry in item["labelsAdded"]:
+                if isinstance(entry, dict):
+                    msg = entry.get("message")
+                    if isinstance(msg, dict) and "id" in msg:
+                        _add(msg["id"])
+                    elif "id" in entry:
+                        _add(entry["id"])
+
+        # 3. messages list
         if "messages" in item and isinstance(item["messages"], list):
             for entry in item["messages"]:
                 if isinstance(entry, dict) and "id" in entry:
@@ -79,8 +89,8 @@ def extract_unique_message_ids(history_data: Any) -> list[str]:
                 elif isinstance(entry, str):
                     _add(entry)
 
-        # 3. Direct id if item has neither messagesAdded nor messages
-        if "messagesAdded" not in item and "messages" not in item and "id" in item:
+        # 4. Direct id if item has neither messagesAdded nor messages nor labelsAdded
+        if "messagesAdded" not in item and "messages" not in item and "labelsAdded" not in item and "id" in item:
             _add(item["id"])
 
     return message_ids
@@ -98,9 +108,9 @@ async def process_gmail_sync(
     1. Load gmail_account with SELECT ... FOR UPDATE (row lock).
     2. If sync_status == 'paused' or 'error', skip processing.
     3. Decrypt access_token and refresh_token via crypto helpers.
-    4. If last_history_id is None (initial sync): call get_profile, update last_history_id, set status='active', return.
-    5. Call list_history(access_token, start_history_id=account.last_history_id).
-    6. Extract unique message IDs from history response (messagesAdded).
+    4. If last_history_id is None (initial sync): call get_profile, discover recent inbox messages, enqueue them.
+    5. Call list_history(access_token, start_history_id=account.last_history_id). Handle 404 recovery.
+    6. Extract unique message IDs from history response (messagesAdded, labelsAdded).
     7. For each message_id, enqueue email_fetch job with deterministic ID and payload.
     8. Update account.last_history_id to max(historyId from response, history_id_from_pubsub).
     9. Update account.last_sync_at = now(), sync_status='active', last_error=None.
@@ -169,19 +179,64 @@ async def process_gmail_sync(
         account.updated_at = now
         await db.commit()
         await db.refresh(account)
-        logger.info("Initial sync completed for account %s: historyId=%s", account_id, initial_history_id)
-        duration = time.perf_counter() - start_time
-        job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
-        gmail_sync_jobs_total.labels(status="success").inc()
-        return {"status": "initial_sync", "history_id": initial_history_id, "messages_enqueued": 0}
 
-    # 5. Call list_history
+        # Discover recent inbox messages so the email that triggered this notification is not dropped
+        initial_enqueued = 0
+        try:
+            recent_msgs = await gmail.list_messages(
+                access_token=access_token or "",
+                q="in:inbox",
+                max_results=5,
+                refresh_token=refresh_token,
+            )
+            for m in recent_msgs:
+                mid = m.get("id") if isinstance(m, dict) else None
+                if not mid:
+                    continue
+                fetch_job_id = make_email_fetch_job_id(account.owner_user_id, mid)
+                fetch_payload = {"account_id": str(account.id), "message_id": mid}
+                await ensure_job(
+                    db,
+                    owner_user_id=account.owner_user_id,
+                    job_type="email_fetch",
+                    job_id=fetch_job_id,
+                    payload=fetch_payload,
+                )
+                try:
+                    await enqueue("email_fetch", kwargs=fetch_payload, job_id=fetch_job_id)
+                except Exception as exc:
+                    logger.warning("Failed to enqueue initial email_fetch job %s: %s", fetch_job_id, exc)
+                initial_enqueued += 1
+        except Exception as msg_exc:
+            logger.warning("Could not list recent inbox messages during initial sync: %s", msg_exc)
+
+        logger.info("Initial sync completed for account %s: historyId=%s, messages_enqueued=%d", account_id, initial_history_id, initial_enqueued)
+        duration = time.perf_counter() - start_time
+        try:
+            job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+            gmail_sync_jobs_total.labels(status="success").inc()
+        except Exception:
+            pass
+        return {"status": "initial_sync", "history_id": initial_history_id, "messages_enqueued": initial_enqueued}
+
+    # 5. Call list_history with 404 expiry fallback
+    from app.services.gmail.client import GmailClientError
     try:
         history_response = await gmail.list_history(
             access_token=access_token or "",
             start_history_id=account.last_history_id,
             refresh_token=refresh_token,
         )
+    except GmailClientError as exc:
+        if getattr(exc, "status_code", None) == 404:
+            logger.info("History ID %s expired (404); recovering via profile and recent messages", account.last_history_id)
+            profile = await gmail.get_profile(access_token=access_token or "", refresh_token=refresh_token)
+            account.last_history_id = str(profile.get("historyId") or history_id_from_pubsub or "")
+            await db.commit()
+            recent_msgs = await gmail.list_messages(access_token=access_token or "", q="in:inbox", max_results=5, refresh_token=refresh_token)
+            history_response = [{"messagesAdded": [{"message": {"id": m["id"]}}]} for m in recent_msgs if isinstance(m, dict) and "id" in m]
+        else:
+            raise
     except GmailAuthError:
         account.sync_status = "error"
         account.last_error = "reauth_required"

@@ -14,6 +14,7 @@
 **CYBERGUARD** is an enterprise-grade, next-generation Security Operations Center (SOC) and Security Orchestration, Automation, and Response (SOAR) platform. It ingests multi-vector telemetry (emails, URLs, messages, authentication telemetry, network flows, API traffic, and media forensics), analyzes them using a **hybrid detection engine** (transparent heuristics + high-performance ML models), produces **Explainable AI (XAI)** threat intelligence via **OpenRouter**, and executes real-time automated quarantine and response actions through an interactive cyber defense command center.
 
 For comprehensive operational runbooks, disaster recovery, and troubleshooting, consult the [Operational Runbook (RUNBOOK.md)](RUNBOOK.md).
+For a complete step-by-step walkthrough on configuring real-time Gmail inbox scanning and automated quarantine from scratch, see the [Real-Time Gmail Setup Guide (REALTIME_GMAIL_SETUP_GUIDE.md)](REALTIME_GMAIL_SETUP_GUIDE.md).
 
 ---
 

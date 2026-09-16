@@ -147,6 +147,18 @@ class GmailClient:
         top_history_id = data.get("historyId")
         return HistoryResult(history_items, history_id=top_history_id)
 
+    async def list_messages(
+        self,
+        access_token: str,
+        q: str = "in:inbox",
+        max_results: int = 10,
+        refresh_token: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Call GET https://gmail.googleapis.com/gmail/v1/users/me/messages?q={q}&maxResults={max_results}."""
+        url = f"{GMAIL_API_BASE}/users/me/messages?q={q}&maxResults={max_results}"
+        data = await self._request("GET", url, access_token, refresh_token=refresh_token)
+        return data.get("messages", [])
+
     async def get_profile(
         self,
         access_token: str,

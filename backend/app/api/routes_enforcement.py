@@ -282,8 +282,14 @@ async def release_and_trust_sender(
         ),
     )
     await log_action(
-        db, user_id=user.id, actor_type="user", action="trust_sender",
-        resource=entry.sender_email, details=entry.reason,
+        db,
+        owner_user_id=user.id,
+        user_id=user.id,
+        user_name=user.email or "User",
+        actor_type="user",
+        action="trust_sender",
+        resource=entry.sender_email,
+        details=entry.reason,
     )
 
     # Honest two-step: report an active filter instead of silently removing it.
@@ -358,8 +364,14 @@ async def trust_sender_endpoint(
             operation_detail=f"Sender {entry.sender_email} added to your trust list — recommend-only enforcement",
         )
         await log_action(
-            db, user_id=user.id, actor_type="user", action="trust_sender",
-            resource=entry.sender_email, details=entry.reason,
+            db,
+            owner_user_id=user.id,
+            user_id=user.id,
+            user_name=user.email or "User",
+            actor_type="user",
+            action="trust_sender",
+            resource=entry.sender_email,
+            details=entry.reason,
         )
     return TrustedSenderRead(
         id=entry.id,

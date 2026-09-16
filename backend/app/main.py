@@ -56,6 +56,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Application lifespan: initialize database schema, seed data, and start background workers."""
+    import asyncio
     logger.info("Starting CYBERGUARD backend...")
     await init_db()
     rotator = get_key_rotator()
@@ -64,12 +65,34 @@ async def lifespan(_app: FastAPI):
     from app.services.scheduler import start_scheduler
 
     start_scheduler()
+
+    # Start embedded ARQ background worker so email ingestion and threat analysis jobs process automatically
+    embedded_worker = None
+    worker_task = None
+    try:
+        from arq.worker import create_worker
+        from app.workers.email_worker import WorkerSettings as EmailWorkerSettings
+
+        embedded_worker = create_worker(EmailWorkerSettings)
+        worker_task = asyncio.create_task(embedded_worker.async_run())
+        logger.info("Embedded ARQ background worker started for email ingestion & threat analysis.")
+    except Exception as exc:
+        logger.warning("Could not start embedded ARQ worker (external worker can still be used): %s", exc)
+
     yield
     logger.info("Shutting down CYBERGUARD backend...")
     rotator.stop_background_task()
     from app.services.scheduler import stop_scheduler
 
     stop_scheduler()
+
+    if embedded_worker:
+        try:
+            await embedded_worker.close()
+        except Exception:
+            pass
+    if worker_task:
+        worker_task.cancel()
 
 
 app = FastAPI(

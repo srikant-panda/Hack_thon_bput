@@ -1,7 +1,9 @@
 """Application settings loaded from environment variables / .env file."""
 
 from functools import lru_cache
+from typing import Self
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,16 +23,84 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
-    DATABASE_URL: str = "sqlite+aiosqlite:///./cyberguard.db"
+    DATABASE_URL: str = ""
     # Service-role DSN used by Alembic migrations (bypasses RLS).
     # Falls back to DATABASE_URL when empty.
     MIGRATION_DATABASE_URL: str = ""
+
+    # Strict Test Mode Configuration (Enabled by default)
+    TEST_MODE: bool = True
+    TEST_DATABASE_URL: str = ""
+    TEST_MIGRATION_DATABASE_URL: str = ""
+    TEST_REDIS_URL: str = ""
+    TEST_ARQ_QUEUE_NAME: str = "cyberguard_email_test"
+
+    @model_validator(mode="after")
+    def _validate_and_apply_urls(self) -> Self:
+        """Enforce strict database, Redis, and queue configuration with fail-fast validation."""
+        # 1. Database URL Strict Enforcement
+        if self.TEST_MODE:
+            if not self.TEST_DATABASE_URL or not self.TEST_DATABASE_URL.strip():
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: TEST_MODE=True is enabled, "
+                    "but TEST_DATABASE_URL is missing or empty. SQLite fallback is disabled "
+                    "because SQLite does not support PostgreSQL Row-Level Security (RLS). "
+                    "Please define TEST_DATABASE_URL (e.g. postgresql+asyncpg://...) in your environment or .env."
+                )
+            self.DATABASE_URL = self.TEST_DATABASE_URL.strip()
+            if self.TEST_MIGRATION_DATABASE_URL and self.TEST_MIGRATION_DATABASE_URL.strip():
+                self.MIGRATION_DATABASE_URL = self.TEST_MIGRATION_DATABASE_URL.strip()
+            else:
+                self.MIGRATION_DATABASE_URL = self.DATABASE_URL
+        else:
+            if not self.DATABASE_URL or not self.DATABASE_URL.strip():
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: TEST_MODE=False (Main Database Mode), "
+                    "but DATABASE_URL is missing or empty. SQLite fallback is disabled "
+                    "to enforce PostgreSQL Row-Level Security (RLS). "
+                    "Please define DATABASE_URL in your environment or .env."
+                )
+            self.DATABASE_URL = self.DATABASE_URL.strip()
+            if self.MIGRATION_DATABASE_URL and self.MIGRATION_DATABASE_URL.strip():
+                self.MIGRATION_DATABASE_URL = self.MIGRATION_DATABASE_URL.strip()
+            else:
+                self.MIGRATION_DATABASE_URL = self.DATABASE_URL
+
+        # 2. Redis URL Strict Enforcement
+        if self.TEST_MODE:
+            if not self.TEST_REDIS_URL or not self.TEST_REDIS_URL.strip():
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: TEST_MODE=True is enabled, "
+                    "but TEST_REDIS_URL is missing or empty. "
+                    "Please define TEST_REDIS_URL (e.g. redis://localhost:6379/1) in your environment or .env."
+                )
+            self.REDIS_URL = self.TEST_REDIS_URL.strip()
+            if self.TEST_ARQ_QUEUE_NAME and self.TEST_ARQ_QUEUE_NAME.strip():
+                self.ARQ_QUEUE_NAME = self.TEST_ARQ_QUEUE_NAME.strip()
+        else:
+            if not self.REDIS_URL or not self.REDIS_URL.strip():
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: TEST_MODE=False (Main Redis Mode), "
+                    "but REDIS_URL is missing or empty. "
+                    "Please define REDIS_URL (e.g. redis://localhost:6379/0) in your environment or .env."
+                )
+            self.REDIS_URL = self.REDIS_URL.strip()
+
+        # 3. Worker & Queue Parameter Validation
+        if self.ARQ_MAX_JOBS <= 0:
+            raise ValueError(f"ARQ_MAX_JOBS must be greater than 0, got {self.ARQ_MAX_JOBS}")
+        if self.ARQ_JOB_TIMEOUT <= 0:
+            raise ValueError(f"ARQ_JOB_TIMEOUT must be greater than 0, got {self.ARQ_JOB_TIMEOUT}")
+        if self.WORKER_CONCURRENCY <= 0:
+            raise ValueError(f"WORKER_CONCURRENCY must be greater than 0, got {self.WORKER_CONCURRENCY}")
+
+        return self
 
     # Organization accounts are frozen ("coming soon") until the Orgs Phase.
     ORG_ENABLED: bool = False
 
     # Real-time pipeline infrastructure (RT-1 / RT-3)
-    REDIS_URL: str = "redis://localhost:6379"
+    REDIS_URL: str = ""
     ARQ_QUEUE_NAME: str = "cyberguard_email"
     ARQ_MAX_JOBS: int = 10
     ARQ_JOB_TIMEOUT: int = 300

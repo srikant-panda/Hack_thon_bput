@@ -13,13 +13,9 @@
 #   9. redisinsight     -> Redis queue & memory visualizer (http://localhost:5540)
 #
 # Quickstart:
-#   docker compose up -d --build
-#   docker compose ps
-#   docker compose logs -f
-#
-# If you only need infrastructure dependencies (PostgreSQL, Redis, pgAdmin, RedisInsight)
-# while running backend and frontend directly on your host machine, use:
-#   docker compose -f docker-compose.deps.yml up -d
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml ps
+#   docker compose -f docker-compose.prod.yml logs -f
 # ==============================================================================
 
 services:

@@ -84,3 +84,7 @@ logs/
 # Media storage fallback (runtime artifacts)
 backend/storage/
 backend/tests/data/cache/
+
+# Local Docker bind mounts
+volumes/
+

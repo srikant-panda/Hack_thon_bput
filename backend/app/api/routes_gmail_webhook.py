@@ -36,9 +36,10 @@ async def gmail_pubsub_webhook(request: Request) -> dict[str, Any]:
     history_id = str(parsed["history_id"])
 
     # 2. Lookup connected Gmail account (use admin session to query across tenants)
+    from sqlalchemy import func
     admin_session_maker = _get_admin_session_maker()
     async with admin_session_maker() as db:
-        stmt = select(GmailAccount).where(GmailAccount.email == email_address)
+        stmt = select(GmailAccount).where(func.lower(GmailAccount.email) == email_address.lower())
         account = (await db.execute(stmt)).scalar_one_or_none()
 
         if account is None:
@@ -49,7 +50,7 @@ async def gmail_pubsub_webhook(request: Request) -> dict[str, Any]:
 
             conn_stmt = select(EmailConnectorAccount).where(
                 EmailConnectorAccount.provider == "gmail",
-                EmailConnectorAccount.provider_email == email_address,
+                func.lower(EmailConnectorAccount.provider_email) == email_address.lower(),
                 EmailConnectorAccount.status == "connected",
             )
             connector = (await db.execute(conn_stmt)).scalar_one_or_none()

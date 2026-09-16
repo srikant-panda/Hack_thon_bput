@@ -17,6 +17,7 @@ async def log_action(
     db: AsyncSession,
     *,
     tenant: Optional[TenantContext] = None,
+    owner_user_id: Optional[str] = None,
     user_id: Optional[str] = None,
     user_name: Optional[str] = None,
     action: str,
@@ -25,13 +26,26 @@ async def log_action(
     actor_type: str = "user",  # user | system | scheduler (Phase 5)
 ) -> None:
     """Insert an audit log entry for a state-changing operation."""
+    from app.db.session import current_user_id
+
+    resolved_owner = (
+        owner_user_id
+        or (tenant.owner_user_id if tenant and tenant.owner_user_id else None)
+        or (tenant.user_id if tenant and tenant.user_id else None)
+        or user_id
+        or current_user_id.get()
+    )
+    if not resolved_owner:
+        logger.warning("Skipping audit log for action %r: no owner/user identity available", action)
+        return
+
     try:
         entry = AuditLog(
             id=str(uuid.uuid4()),
             organization_id=tenant.organization_id if tenant else None,
-            owner_user_id=tenant.owner_user_id if tenant else None,
+            owner_user_id=resolved_owner,
             actor_type=actor_type,
-            user_id=user_id,
+            user_id=user_id or resolved_owner,
             user_name=user_name or "System",
             action=action,
             resource=resource,
@@ -40,6 +54,7 @@ async def log_action(
         db.add(entry)
         await db.commit()
     except Exception:
+        await db.rollback()
         logger.exception("Failed to write audit log for action %r", action)
 
 

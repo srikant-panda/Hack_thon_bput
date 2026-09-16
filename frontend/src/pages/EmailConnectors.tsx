@@ -86,6 +86,26 @@ export default function EmailConnectors() {
   const oauthReason = searchParams.get('reason');
   const oauthProvider = searchParams.get('connected');
 
+  const [activity, setActivity] = useState<api.IngestionActivity | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [autoRefreshActivity, setAutoRefreshActivity] = useState(true);
+
+  const loadActivity = useCallback(async () => {
+    try {
+      const data = await api.getIngestionActivity();
+      setActivity(data);
+    } catch {
+      // silent fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    loadActivity();
+    if (!autoRefreshActivity) return;
+    const interval = setInterval(loadActivity, 4000);
+    return () => clearInterval(interval);
+  }, [loadActivity, autoRefreshActivity]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setActionError(null);
@@ -414,6 +434,156 @@ export default function EmailConnectors() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Real-time Mailbox Ingestion & Threat Analysis Monitor */}
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-sm backdrop-blur">
+        <div className="flex flex-col gap-3 border-b border-zinc-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500"></span>
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                Live Ingestion & Threat Analysis Monitor
+              </h2>
+              <p className="text-xs text-zinc-400">
+                Listening for real-time mailbox push notifications via Google Cloud Pub/Sub & background worker pipeline.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAutoRefreshActivity(!autoRefreshActivity)}
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                autoRefreshActivity
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                  : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <span className={`inline-block h-2 w-2 rounded-full ${autoRefreshActivity ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+              Auto-refresh (4s)
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                setActivityLoading(true);
+                await loadActivity();
+                setActivityLoading(false);
+              }}
+              disabled={activityLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-800/60 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${activityLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Metric summary bar */}
+        {activity && (
+          <div className="grid grid-cols-3 divide-x divide-zinc-800 border-b border-zinc-800 bg-zinc-950/40 text-center text-xs">
+            <div className="py-2.5">
+              <span className="text-zinc-500">Processed Emails: </span>
+              <span className="font-semibold text-zinc-200">{activity.summary.total_processed}</span>
+            </div>
+            <div className="py-2.5">
+              <span className="text-zinc-500">Threats Detected: </span>
+              <span className="font-semibold text-red-400">{activity.summary.threats_detected}</span>
+            </div>
+            <div className="py-2.5">
+              <span className="text-zinc-500">Auto-Quarantined: </span>
+              <span className="font-semibold text-orange-400">{activity.summary.quarantined}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Email processing log table */}
+        {!activity || activity.recent_emails.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-zinc-500">
+            {activityLoading ? (
+              <div className="flex items-center justify-center gap-2 text-zinc-400">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading recent activity...
+              </div>
+            ) : (
+              'No mailbox events processed yet. Send a test email to your connected Gmail to observe real-time ingestion, analysis, and action.'
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-zinc-800/80 overflow-x-auto">
+            {activity.recent_emails.map((email) => {
+              const isPhish = email.classification === 'phishing' || (email.risk_score !== null && email.risk_score >= 0.7);
+              const isSus = email.classification === 'suspicious';
+              return (
+                <div key={email.id} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between text-xs transition hover:bg-zinc-800/30">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-zinc-200 truncate max-w-md">
+                        {email.subject || '(No Subject)'}
+                      </span>
+                      <span className="text-zinc-500 font-mono text-[11px]">from {email.sender || 'Unknown'}</span>
+                      <span className="text-zinc-600 text-[10px]">· {formatWhen(email.received_at || email.created_at)}</span>
+                    </div>
+                    {email.enforcement_detail && (
+                      <p className="mt-1 text-[11px] text-zinc-400 truncate max-w-2xl">
+                        💡 {email.enforcement_detail}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    {/* Pipeline Stage Badge */}
+                    <span className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                      email.processing_status === 'completed'
+                        ? 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/30'
+                        : email.processing_status === 'analyzing' || email.processing_status === 'fetching'
+                        ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/30 animate-pulse'
+                        : 'bg-zinc-800 text-zinc-400'
+                    }`}>
+                      {email.processing_status}
+                    </span>
+
+                    {/* Threat / Risk Badge */}
+                    {email.risk_score !== null && (
+                      <span className={`rounded px-2 py-0.5 font-mono font-semibold text-[10px] ${
+                        isPhish
+                          ? 'bg-red-500/15 text-red-400 ring-1 ring-red-500/40'
+                          : isSus
+                          ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/40'
+                          : 'bg-emerald-500/10 text-emerald-400'
+                      }`}>
+                        Score: {Math.round(email.risk_score * 100)}% ({email.classification || 'safe'})
+                      </span>
+                    )}
+
+                    {/* SOAR Action Badge */}
+                    {email.enforcement_status && (
+                      <span className={`rounded px-2 py-0.5 font-mono text-[10px] font-semibold ${
+                        email.enforcement_status === 'quarantined' || email.enforcement_status === 'success'
+                          ? 'bg-red-500/20 text-red-300 ring-1 ring-red-500/50'
+                          : email.enforcement_status === 'skipped_trusted_sender'
+                          ? 'bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/40'
+                          : email.enforcement_status === 'review_recommended'
+                          ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40'
+                          : 'bg-zinc-800 text-zinc-400'
+                      }`}>
+                        {email.enforcement_status === 'skipped_trusted_sender'
+                          ? 'Action: Skipped (Trusted Sender)'
+                          : email.enforcement_status === 'quarantined' || email.enforcement_status === 'success'
+                          ? 'Action: Quarantined'
+                          : email.enforcement_status === 'review_recommended'
+                          ? 'Action: Review Recommended'
+                          : `Action: ${email.enforcement_status}`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

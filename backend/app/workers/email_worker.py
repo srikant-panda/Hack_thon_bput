@@ -147,68 +147,98 @@ async def email_analysis_job(ctx: dict[str, Any], processed_email_id: str) -> di
                 )
 
                 # Automated SOAR Enforcement for high-risk threats / phishing
-                if result.get("classification") == "phishing" or (result.get("risk_score") or 0.0) >= 0.7:
-                    try:
-                        from app.db.models import EmailConnectorAccount, ProcessedEmail, ScanResult as DBScanResult
-                        from app.schemas.email import NormalizedMessage
-                        from app.schemas.scan_results import ScanResult as PydanticScanResult, FeatureAnalysis
-                        from app.services.action_engine import enforce_scan_result
+                pe_stmt = select(ProcessedEmail).where(ProcessedEmail.id == processed_email_id)
+                pe_row = (await db.execute(pe_stmt)).scalar_one_or_none()
 
-                        pe_stmt = select(ProcessedEmail).where(ProcessedEmail.id == processed_email_id)
-                        pe_row = (await db.execute(pe_stmt)).scalar_one_or_none()
-                        if pe_row and pe_row.gmail_message_id:
-                            conn_stmt = select(EmailConnectorAccount).where(
-                                EmailConnectorAccount.owner_user_id == pe_row.owner_user_id,
-                                EmailConnectorAccount.status == "connected",
-                            )
-                            connector = (await db.execute(conn_stmt)).scalars().first()
-                            if connector:
-                                explanation_text = f"High-risk threat detected (risk score: {pe_row.risk_score})"
-                                if pe_row.scan_result_id:
-                                    sr_stmt = select(DBScanResult).where(DBScanResult.id == pe_row.scan_result_id)
-                                    sr_row = (await db.execute(sr_stmt)).scalar_one_or_none()
-                                    if sr_row and sr_row.scan_details:
-                                        explanation_text = sr_row.scan_details.get("explanation", explanation_text)
+                if pe_row:
+                    from app.db.session import current_user_id
+                    current_user_id.set(pe_row.owner_user_id)
 
-                                scan_pydantic = PydanticScanResult(
-                                    message_id=pe_row.gmail_message_id,
-                                    subject=pe_row.subject,
-                                    sender=pe_row.sender,
-                                    overall_severity="critical" if (pe_row.risk_score or 0) >= 0.7 else "high",
-                                    overall_score=int((pe_row.risk_score or 0.0) * 100),
-                                    overall_explanation=explanation_text,
-                                    feature_analyses=[
-                                        FeatureAnalysis(
-                                            engine="heuristics",
-                                            severity="critical" if (pe_row.risk_score or 0) >= 0.7 else "high",
-                                            score=int((pe_row.risk_score or 0.0) * 100),
-                                            explanation=explanation_text,
-                                        ),
-                                        FeatureAnalysis(
-                                            engine="ml_model",
-                                            severity="critical" if (pe_row.risk_score or 0) >= 0.7 else "high",
-                                            score=int((pe_row.risk_score or 0.0) * 100),
-                                            explanation="ML classifier high threat probability",
-                                        ),
-                                    ],
-                                    recommended_action="quarantine",
-                                    provider_operation_status="pending",
+                    if result.get("classification") == "phishing" or (result.get("risk_score") or 0.0) >= 0.7:
+                        try:
+                            from app.db.models import EmailConnectorAccount, ScanResult as DBScanResult
+                            from app.schemas.email import NormalizedMessage
+                            from app.schemas.scan_results import ScanResult as PydanticScanResult, FeatureAnalysis
+                            from app.services.action_engine import enforce_scan_result
+
+                            if pe_row.gmail_message_id:
+                                conn_stmt = select(EmailConnectorAccount).where(
+                                    EmailConnectorAccount.owner_user_id == pe_row.owner_user_id,
+                                    EmailConnectorAccount.status == "connected",
                                 )
-                                norm_msg = NormalizedMessage(
-                                    provider_message_id=pe_row.gmail_message_id,
-                                    thread_id=pe_row.gmail_message_id,
-                                    sender=pe_row.sender or "",
-                                    recipients=[connector.provider_email],
-                                    subject=pe_row.subject or "",
-                                    snippet="",
-                                    raw_size_bytes=100,
-                                    has_attachments=False,
-                                    internal_date=pe_row.created_at,
-                                )
-                                await enforce_scan_result(db, connector, norm_msg, scan_pydantic)
-                                logger.info("Auto-enforced quarantine for high-risk message %s", pe_row.gmail_message_id)
-                    except Exception as enf_exc:
-                        logger.warning("Auto-enforcement hook encountered error (non-fatal): %s", enf_exc)
+                                connector = (await db.execute(conn_stmt)).scalars().first()
+                                if connector:
+                                    explanation_text = f"High-risk threat detected (risk score: {pe_row.risk_score})"
+                                    if pe_row.scan_result_id:
+                                        sr_stmt = select(DBScanResult).where(DBScanResult.id == pe_row.scan_result_id)
+                                        sr_row = (await db.execute(sr_stmt)).scalar_one_or_none()
+                                        if sr_row and sr_row.scan_details:
+                                            explanation_text = sr_row.scan_details.get("explanation", explanation_text)
+
+                                    scan_pydantic = PydanticScanResult(
+                                        message_id=pe_row.gmail_message_id,
+                                        subject=pe_row.subject,
+                                        sender=pe_row.sender,
+                                        overall_severity="critical" if (pe_row.risk_score or 0) >= 0.7 else "high",
+                                        overall_score=int((pe_row.risk_score or 0.0) * 100),
+                                        overall_explanation=explanation_text,
+                                        feature_analyses=[
+                                            FeatureAnalysis(
+                                                engine="heuristics",
+                                                severity="critical" if (pe_row.risk_score or 0) >= 0.7 else "high",
+                                                score=int((pe_row.risk_score or 0.0) * 100),
+                                                explanation=explanation_text,
+                                            ),
+                                            FeatureAnalysis(
+                                                engine="ml_model",
+                                                severity="critical" if (pe_row.risk_score or 0) >= 0.7 else "high",
+                                                score=int((pe_row.risk_score or 0.0) * 100),
+                                                explanation="ML classifier high threat probability",
+                                            ),
+                                        ],
+                                        recommended_action="quarantine",
+                                        provider_operation_status="pending",
+                                    )
+                                    norm_msg = NormalizedMessage(
+                                        provider_message_id=pe_row.gmail_message_id,
+                                        thread_id=pe_row.gmail_message_id,
+                                        sender=pe_row.sender or "",
+                                        recipients=[connector.provider_email],
+                                        subject=pe_row.subject or "",
+                                        snippet="",
+                                        raw_size_bytes=100,
+                                        has_attachments=False,
+                                        internal_date=pe_row.created_at,
+                                    )
+                                    enforced = await enforce_scan_result(db, connector, norm_msg, scan_pydantic)
+                                    # Record the real outcome on the processed email signals for UI visibility
+                                    updated_signals = dict(pe_row.signals or {})
+                                    updated_signals["enforcement_status"] = enforced.provider_operation_status
+                                    updated_signals["enforcement_detail"] = enforced.provider_operation_detail
+                                    pe_row.signals = updated_signals
+                                    await db.commit()
+                                    logger.info(
+                                        "Auto-enforcement completed for message %s: status=%s (%s)",
+                                        pe_row.gmail_message_id,
+                                        enforced.provider_operation_status,
+                                        enforced.provider_operation_detail,
+                                    )
+                        except Exception as enf_exc:
+                            logger.warning("Auto-enforcement hook encountered error (non-fatal): %s", enf_exc)
+                            try:
+                                updated_signals = dict(pe_row.signals or {})
+                                updated_signals["enforcement_status"] = "enforcement_error"
+                                updated_signals["enforcement_detail"] = str(enf_exc)
+                                pe_row.signals = updated_signals
+                                await db.commit()
+                            except Exception:
+                                pass
+                    else:
+                        updated_signals = dict(pe_row.signals or {})
+                        updated_signals["enforcement_status"] = "clean"
+                        updated_signals["enforcement_detail"] = "Verdict safe: email kept in inbox."
+                        pe_row.signals = updated_signals
+                        await db.commit()
 
                 if job_id:
                     try:

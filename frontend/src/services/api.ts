@@ -766,6 +766,59 @@ export async function removeTrustedSender(senderId: string): Promise<string> {
   return res.status as string;
 }
 
+export interface ProcessedEmailActivity {
+  id: string;
+  gmail_message_id: string;
+  sender: string | null;
+  subject: string | null;
+  received_at: string | null;
+  processing_status: string;
+  risk_score: number | null;
+  classification: string | null;
+  enforcement_status: string | null;
+  enforcement_detail: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IngestionActivity {
+  connected_mailboxes: Array<{
+    id: string;
+    email: string;
+    provider: string;
+    status: string;
+    last_sync_at: string | null;
+    last_error: string | null;
+  }>;
+  recent_emails: ProcessedEmailActivity[];
+  recent_jobs: Array<{
+    id: string;
+    job_id: string;
+    job_type: string;
+    status: string;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  summary: {
+    total_processed: number;
+    threats_detected: number;
+    quarantined: number;
+  };
+}
+
+export async function getIngestionActivity(limit: number = 20): Promise<IngestionActivity> {
+  if (USE_MOCK) {
+    return {
+      connected_mailboxes: [],
+      recent_emails: [],
+      recent_jobs: [],
+      summary: { total_processed: 0, threats_detected: 0, quarantined: 0 },
+    };
+  }
+  return (await apiFetch(`/connectors/activity?limit=${limit}`)) as IngestionActivity;
+}
+
 
 // --- Security history (Phase 5) ---
 

@@ -1,0 +1,115 @@
+# ==============================================================================
+# CYBERGUARD — Local Development Dependencies Compose
+# ==============================================================================
+# This Compose file runs ONLY the core infrastructure dependencies:
+#   1. PostgreSQL 16   -> localhost:5432 (User: postgres, Password: postgres, DB: cyberguard)
+#   2. Redis 7         -> localhost:6379 (Queue, cache & pub/sub broker)
+#   3. pgAdmin 4       -> http://localhost:5050 (Web DB GUI: admin@cyberguard.org / admin)
+#   4. RedisInsight    -> http://localhost:5540 (Web Redis GUI & queue visualizer)
+#
+# Usage:
+#   docker compose -f docker-compose.deps.yml up -d
+#   docker compose -f docker-compose.deps.yml ps
+#   docker compose -f docker-compose.deps.yml down
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. PostgreSQL Database
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: cyberguard-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: cyberguard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cyberguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - cyberguard-deps-net
+
+  # ----------------------------------------------------------------------------
+  # 2. Redis Cache & Distributed Task Broker
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: cyberguard-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    networks:
+      - cyberguard-deps-net
+
+  # ----------------------------------------------------------------------------
+  # 3. pgAdmin 4 (PostgreSQL Web Administration GUI)
+  # ----------------------------------------------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: cyberguard-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@cyberguard.org
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cyberguard-deps-net
+
+  # ----------------------------------------------------------------------------
+  # 4. RedisInsight (Redis Real-time Analytics & Queue Inspection GUI)
+  # ----------------------------------------------------------------------------
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: cyberguard-redisinsight
+    restart: unless-stopped
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cyberguard-deps-net
+
+# ------------------------------------------------------------------------------
+# Persistent Volumes & Networks
+# ------------------------------------------------------------------------------
+volumes:
+  postgres-data:
+    name: cyberguard_deps_postgres_data
+  redis-data:
+    name: cyberguard_deps_redis_data
+  pgadmin-data:
+    name: cyberguard_deps_pgadmin_data
+  redisinsight-data:
+    name: cyberguard_deps_redisinsight_data
+
+networks:
+  cyberguard-deps-net:
+    name: cyberguard-deps-net
+    driver: bridge
