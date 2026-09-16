@@ -77,19 +77,14 @@ async def readiness_check(
 
 
 @router.get("/metrics", response_class=PlainTextResponse)
-async def metrics() -> str:
-    """Prometheus-format metrics placeholder (RT-9 populates real metrics)."""
-    settings = get_settings()
-    lines = [
-        "# HELP cyberguard_up CyberGuard service availability (1 = up)",
-        "# TYPE cyberguard_up gauge",
-        "cyberguard_up 1",
-        "# HELP cyberguard_build_info Build and version info",
-        "# TYPE cyberguard_build_info gauge",
-        f'cyberguard_build_info{{version="{settings.APP_VERSION}"}} 1',
-        "# HELP cyberguard_pipeline_events_total Total real-time events processed",
-        "# TYPE cyberguard_pipeline_events_total counter",
-        "cyberguard_pipeline_events_total 0",
-        "",
-    ]
-    return "\n".join(lines)
+async def metrics() -> PlainTextResponse:
+    """Return real-time Prometheus-formatted metrics."""
+    from app.core.metrics import generate_prometheus_metrics, update_queue_depth
+
+    try:
+        await update_queue_depth()
+    except Exception:
+        pass
+
+    content = generate_prometheus_metrics()
+    return PlainTextResponse(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")

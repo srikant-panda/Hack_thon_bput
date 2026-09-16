@@ -68,6 +68,11 @@ async def update_job_status(
         if new_status == "dead_letter":
             job.retry_count = job.max_retries
             job.next_retry_at = None
+            try:
+                from app.core.metrics import dead_letter_jobs_total
+                dead_letter_jobs_total.labels(job_type=job.job_type).inc()
+            except Exception:
+                pass
         else:
             job.retry_count += 1
             delay = compute_backoff_delay(job.retry_count)

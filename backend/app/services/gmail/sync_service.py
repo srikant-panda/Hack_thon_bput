@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.metrics import (
+    gmail_api_errors_total,
+    gmail_sync_jobs_total,
+    job_processing_duration_seconds,
+)
 from app.db.models import GmailAccount
 from app.queue.client import enqueue, make_email_fetch_job_id
 from app.services.gmail.client import (
@@ -102,6 +108,8 @@ async def process_gmail_sync(
     11. Catch GmailRateLimitError -> re-raise for Arq backoff retry.
     12. Catch GmailServerError -> re-raise for Arq backoff retry.
     """
+    start_time = time.perf_counter()
+
     # 1. Load account with FOR UPDATE lock
     stmt = select(GmailAccount).where(GmailAccount.id == account_id).with_for_update()
     account = (await db.execute(stmt)).scalar_one_or_none()
@@ -129,8 +137,27 @@ async def process_gmail_sync(
             account.last_error = "reauth_required"
             account.updated_at = datetime.now(timezone.utc)
             await db.commit()
+            duration = time.perf_counter() - start_time
+            job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+            gmail_sync_jobs_total.labels(status="failed").inc()
+            gmail_api_errors_total.labels(error_type="auth").inc()
             raise
-        except (GmailRateLimitError, GmailServerError):
+        except GmailRateLimitError:
+            duration = time.perf_counter() - start_time
+            job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+            gmail_sync_jobs_total.labels(status="failed").inc()
+            gmail_api_errors_total.labels(error_type="rate_limit").inc()
+            raise
+        except GmailServerError:
+            duration = time.perf_counter() - start_time
+            job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+            gmail_sync_jobs_total.labels(status="failed").inc()
+            gmail_api_errors_total.labels(error_type="server").inc()
+            raise
+        except Exception:
+            duration = time.perf_counter() - start_time
+            job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+            gmail_sync_jobs_total.labels(status="failed").inc()
             raise
 
         initial_history_id = str(profile.get("historyId") or history_id_from_pubsub or "")
@@ -143,6 +170,9 @@ async def process_gmail_sync(
         await db.commit()
         await db.refresh(account)
         logger.info("Initial sync completed for account %s: historyId=%s", account_id, initial_history_id)
+        duration = time.perf_counter() - start_time
+        job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+        gmail_sync_jobs_total.labels(status="success").inc()
         return {"status": "initial_sync", "history_id": initial_history_id, "messages_enqueued": 0}
 
     # 5. Call list_history
@@ -157,8 +187,27 @@ async def process_gmail_sync(
         account.last_error = "reauth_required"
         account.updated_at = datetime.now(timezone.utc)
         await db.commit()
+        duration = time.perf_counter() - start_time
+        job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+        gmail_sync_jobs_total.labels(status="failed").inc()
+        gmail_api_errors_total.labels(error_type="auth").inc()
         raise
-    except (GmailRateLimitError, GmailServerError):
+    except GmailRateLimitError:
+        duration = time.perf_counter() - start_time
+        job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+        gmail_sync_jobs_total.labels(status="failed").inc()
+        gmail_api_errors_total.labels(error_type="rate_limit").inc()
+        raise
+    except GmailServerError:
+        duration = time.perf_counter() - start_time
+        job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+        gmail_sync_jobs_total.labels(status="failed").inc()
+        gmail_api_errors_total.labels(error_type="server").inc()
+        raise
+    except Exception:
+        duration = time.perf_counter() - start_time
+        job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+        gmail_sync_jobs_total.labels(status="failed").inc()
         raise
 
     # 6. Extract unique message IDs
@@ -217,6 +266,13 @@ async def process_gmail_sync(
         enqueued_count,
         account.last_history_id,
     )
+    duration = time.perf_counter() - start_time
+    try:
+        job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)
+        gmail_sync_jobs_total.labels(status="success").inc()
+    except Exception:
+        pass
+
     return {
         "status": "synced",
         "messages_enqueued": enqueued_count,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -19,6 +20,11 @@ from app.core.limits import (
     MAX_EMAIL_BYTES,
     MAX_MIME_PARTS,
     MAX_URLS,
+)
+from app.core.metrics import (
+    email_fetch_jobs_total,
+    gmail_api_errors_total,
+    job_processing_duration_seconds,
 )
 from app.db.models import GmailAccount, ProcessedEmail
 from app.queue.client import enqueue, make_email_analysis_job_id
@@ -144,6 +150,8 @@ async def process_email_fetch(
     8. Enqueue email_analysis job with deterministic ID and payload {processed_email_id}.
     9. Error classification: 401 -> reauth_required; transient -> retry; NonRetryableError -> dead_letter.
     """
+    start_time = time.perf_counter()
+
     stmt = select(GmailAccount).where(GmailAccount.id == account_id)
     account = (await db.execute(stmt)).scalar_one_or_none()
     if account is None:
@@ -194,8 +202,31 @@ async def process_email_fetch(
         account.last_error = "reauth_required"
         account.updated_at = datetime.now(timezone.utc)
         await db.commit()
+        duration = time.perf_counter() - start_time
+        try:
+            job_processing_duration_seconds.labels(job_type="email_fetch").observe(duration)
+            email_fetch_jobs_total.labels(status="failed", failure_reason="auth").inc()
+            gmail_api_errors_total.labels(error_type="auth").inc()
+        except Exception:
+            pass
         raise
-    except (GmailRateLimitError, GmailServerError):
+    except GmailRateLimitError:
+        duration = time.perf_counter() - start_time
+        try:
+            job_processing_duration_seconds.labels(job_type="email_fetch").observe(duration)
+            email_fetch_jobs_total.labels(status="failed", failure_reason="rate_limit").inc()
+            gmail_api_errors_total.labels(error_type="rate_limit").inc()
+        except Exception:
+            pass
+        raise
+    except GmailServerError:
+        duration = time.perf_counter() - start_time
+        try:
+            job_processing_duration_seconds.labels(job_type="email_fetch").observe(duration)
+            email_fetch_jobs_total.labels(status="failed", failure_reason="server").inc()
+            gmail_api_errors_total.labels(error_type="server").inc()
+        except Exception:
+            pass
         raise
 
     # 4. Enforce Limits & Parse MIME using reused Phase-2/3 parser
@@ -216,6 +247,12 @@ async def process_email_fetch(
         processed_email.signals["failure_reason"] = err.reason
         processed_email.updated_at = datetime.now(timezone.utc)
         await db.commit()
+        duration = time.perf_counter() - start_time
+        try:
+            job_processing_duration_seconds.labels(job_type="email_fetch").observe(duration)
+            email_fetch_jobs_total.labels(status="failed", failure_reason=err.reason).inc()
+        except Exception:
+            pass
         raise err
 
     # Truncate parts if MIME parts exceed limit
@@ -302,6 +339,12 @@ async def process_email_fetch(
         processed_email.id,
         analysis_job_id,
     )
+    duration = time.perf_counter() - start_time
+    try:
+        job_processing_duration_seconds.labels(job_type="email_fetch").observe(duration)
+        email_fetch_jobs_total.labels(status="success", failure_reason="none").inc()
+    except Exception:
+        pass
 
     return {
         "status": "fetched",

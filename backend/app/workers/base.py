@@ -4,39 +4,32 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 
 from arq.connections import RedisSettings
 
 from app.core.config import get_settings
+from app.core.logging_config import (
+    SensitiveDataFilter,
+    StructuredJsonFormatter,
+    clear_log_context,
+    current_correlation_id,
+    set_log_context,
+)
 
-
-class JsonFormatter(logging.Formatter):
-    """Structured JSON formatter for worker logs."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        log_obj: dict[str, Any] = {
-            "timestamp": self.formatTime(record, self.datefmt),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "correlation_id": getattr(record, "correlation_id", None),
-            "job_id": getattr(record, "job_id", None),
-            "job_type": getattr(record, "job_type", None),
-            "user_id": getattr(record, "user_id", None),
-        }
-        if record.exc_info:
-            log_obj["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_obj)
+# Alias for backward compatibility
+JsonFormatter = StructuredJsonFormatter
 
 
 def get_worker_logger(name: str = "cyberguard.worker") -> logging.Logger:
     """Return configured structured logger for background workers."""
     logger = logging.getLogger(name)
-    if not any(isinstance(h.formatter, JsonFormatter) for h in logger.handlers):
+    if not any(isinstance(h.formatter, StructuredJsonFormatter) for h in logger.handlers):
         handler = logging.StreamHandler()
-        handler.setFormatter(JsonFormatter())
+        handler.setFormatter(StructuredJsonFormatter())
+        handler.addFilter(SensitiveDataFilter())
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
     return logger
@@ -51,17 +44,68 @@ def log_worker_event(
     job_id: str | None = None,
     job_type: str | None = None,
     user_id: str | None = None,
+    worker_name: str | None = None,
     **extra: Any,
 ) -> None:
     """Log an event with standard worker structured metadata."""
+    corr = correlation_id or current_correlation_id.get()
     record_extra = {
-        "correlation_id": correlation_id,
+        "correlation_id": corr,
         "job_id": job_id,
         "job_type": job_type,
         "user_id": user_id,
+        "worker_name": worker_name,
         **extra,
     }
     logger.log(level, message, extra=record_extra)
+
+
+@asynccontextmanager
+async def job_context(
+    ctx: Optional[dict[str, Any]] = None,
+    job_type: Optional[str] = None,
+    job_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    worker_name: Optional[str] = None,
+):
+    """Context manager binding correlation ID and worker metadata to contextvars during execution."""
+    ctx_dict = ctx if isinstance(ctx, dict) else {}
+    corr_id = correlation_id or ctx_dict.get("job_id") or job_id or str(uuid.uuid4())
+    j_id = job_id or ctx_dict.get("job_id") or corr_id
+    set_log_context(
+        correlation_id=corr_id,
+        job_id=j_id,
+        job_type=job_type,
+        user_id=user_id,
+        worker_name=worker_name,
+    )
+    try:
+        yield corr_id
+        if worker_name:
+            try:
+                from app.core.metrics import worker_jobs_total
+                worker_jobs_total.labels(
+                    worker_name=worker_name,
+                    job_type=job_type or "unknown",
+                    status="success",
+                ).inc()
+            except Exception:
+                pass
+    except Exception:
+        if worker_name:
+            try:
+                from app.core.metrics import worker_jobs_total
+                worker_jobs_total.labels(
+                    worker_name=worker_name,
+                    job_type=job_type or "unknown",
+                    status="failed",
+                ).inc()
+            except Exception:
+                pass
+        raise
+    finally:
+        clear_log_context()
 
 
 @asynccontextmanager

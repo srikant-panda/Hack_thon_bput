@@ -18,6 +18,7 @@ dependencies = [
     "opencv-python-headless>=5.0.0.93",
     "pandas>=3.0.5",
     "pillow>=12.3.0",
+    "prometheus-client>=0.26.0",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "python-multipart>=0.0.32",

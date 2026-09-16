@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -10,6 +11,11 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.metrics import (
+    email_analysis_jobs_total,
+    job_processing_duration_seconds,
+    processed_emails_total,
+)
 from app.db.models import ProcessedEmail, ScanResult
 from app.services.impersonation_detector import analyze_impersonation_heuristics
 from app.services.ml_inference import (
@@ -80,6 +86,8 @@ async def process_email_analysis(
     supabase_client: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Execute threat detection pipeline, ML inference, and result persistence."""
+    start_time = time.perf_counter()
+
     # 1. Load processed_email with row lock; verify status == 'fetched'
     stmt = (
         select(ProcessedEmail)
@@ -307,6 +315,14 @@ async def process_email_analysis(
         classification,
         scan_result.id,
     )
+
+    duration = time.perf_counter() - start_time
+    try:
+        job_processing_duration_seconds.labels(job_type="email_analysis").observe(duration)
+        email_analysis_jobs_total.labels(status="success", classification=classification).inc()
+        processed_emails_total.labels(classification=classification).inc()
+    except Exception:
+        pass
 
     # 12. Return summary
     return {

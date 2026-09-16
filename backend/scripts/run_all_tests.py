@@ -525,6 +525,14 @@ async def run_tests():
 
     await run_scheduled_workers_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 29. RT-9 — Observability (correlation IDs, structured JSON logs, Prometheus metrics export)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 29] RT-9 — Observability (Logs, Correlation IDs, Prometheus Metrics)")
+    from test_observability import run_observability_tests
+
+    await run_observability_tests(runner)
+
     return runner.report()
 
 

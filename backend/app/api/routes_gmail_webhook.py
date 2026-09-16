@@ -45,6 +45,13 @@ async def gmail_pubsub_webhook(request: Request) -> dict[str, Any]:
             logger.warning("Pub/Sub notification received for unknown email: %s", email_address)
             return {"status": "ignored", "reason": "unknown_email"}
 
+        # Increment Prometheus metric for received Gmail webhook events
+        try:
+            from app.core.metrics import gmail_events_received_total
+            gmail_events_received_total.labels(owner_user_id=account.owner_user_id).inc()
+        except Exception:
+            pass
+
         # 3. If account sync is paused, acknowledge notification but skip enqueueing
         if account.sync_status == "paused":
             logger.info("Gmail account %s is paused; skipping sync enqueue", email_address)
