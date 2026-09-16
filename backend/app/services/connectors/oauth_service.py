@@ -222,7 +222,8 @@ async def handle_gmail_callback(code: str, state: str) -> EmailConnectorAccount:
         try:
             from app.services.gmail_account_service import get_or_create_gmail_account
 
-            await get_or_create_gmail_account(
+            # Also register or update in GmailAccount for real-time Pub/Sub background workers
+            gmail_acc = await get_or_create_gmail_account(
                 session,
                 owner_user_id=owner_user_id,
                 email=provider_email,
@@ -230,6 +231,18 @@ async def handle_gmail_callback(code: str, state: str) -> EmailConnectorAccount:
                 refresh_token=refresh_token,
             )
             logger.info("Mirrored Gmail connector to gmail_accounts for %s", provider_email)
+
+            # Auto-register Gmail push watch if GMAIL_PUBSUB_TOPIC is configured
+            from app.core.config import get_settings
+            from app.services.gmail.watch_service import renew_watches
+
+            cfg = get_settings()
+            if cfg.GMAIL_PUBSUB_TOPIC and "<" not in cfg.GMAIL_PUBSUB_TOPIC:
+                try:
+                    await renew_watches(session, account_ids=[str(gmail_acc.id)])
+                    logger.info("Successfully activated Gmail push watch for %s", provider_email)
+                except Exception as watch_exc:
+                    logger.warning("Could not activate push watch on connect for %s: %s", provider_email, watch_exc)
         except Exception:
             logger.exception("Failed to mirror connector to gmail_accounts for %s", provider_email)
 
