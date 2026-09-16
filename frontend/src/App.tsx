@@ -47,6 +47,7 @@ import ResponseActions from './pages/ResponseActions';
 import AuditLogs from './pages/AuditLogs';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import DLQDashboard from './pages/DLQDashboard';
 
 /**
  * Organization features are frozen server-side (ORG_ENABLED=false). While the
@@ -144,6 +145,14 @@ export default function App() {
           <Route path="/reports" element={<WorkspaceGuard path="/reports"><Reports /></WorkspaceGuard>} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/docs" element={<Docs />} />
+          <Route
+            path="/dlq"
+            element={
+              <RoleGuard minimumRole="admin">
+                <DLQDashboard />
+              </RoleGuard>
+            }
+          />
           {/* ORG-1 foundation: always-on org endpoints (backend /orgs router) */}
           <Route path="/org/create" element={<OrganizationCreate />} />
           <Route path="/org/:orgId/settings" element={<OrganizationSettings />} />

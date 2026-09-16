@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     GMAIL_PUBSUB_TOPIC: str = "projects/<your-project>/topics/cyberguard-gmail"
     GMAIL_PUBSUB_AUDIENCE: str | None = None  # optional JWT audience
 
+    # Retry and backoff tuning (RT-10)
+    RETRY_BASE_DELAY_S: int = 5
+    RETRY_MAX_RETRIES: int = 5
+    RETRY_JITTER_ENABLED: bool = True
+
 
     # --- Email connectors (Phase 1-2): Gmail only; own Google OAuth client ---
     GOOGLE_GMAIL_CLIENT_ID: str = ""

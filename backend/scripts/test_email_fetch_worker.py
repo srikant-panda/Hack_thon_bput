@@ -552,7 +552,7 @@ async def run_email_fetch_worker_tests(runner) -> None:
             auth_err_thrown
             and acc_401.sync_status == "error"
             and acc_401.last_error == "reauth_required"
-            and job_401.status == "failed",
+            and job_401.status in ("failed", "dead_letter"),
             "11 401 -> account error reauth_required + job failed",
             f"account_status={acc_401.sync_status}, last_error={acc_401.last_error}, job_status={job_401.status}",
         )

@@ -44,8 +44,23 @@ async def update_job_status(
     if job is None:
         raise ValueError(f"Job not found: {job_id}")
 
-    # For direct dead_letter transition (e.g. NonRetryableError), ensure retry_count reaches max_retries
-    if new_status == "dead_letter":
+    from app.core.retry_policy import evaluate_retry_policy
+
+    # For retry from dead_letter to queued
+    if new_status == "queued" and job.status == "dead_letter":
+        job.retry_count = 0
+        job.error = None
+        job.next_retry_at = None
+
+    original_target_status = new_status
+    # Check retry policy if error is provided and new_status is failed
+    if error is not None and new_status == "failed":
+        decision = evaluate_retry_policy(error, retry_count=job.retry_count, max_retries=job.max_retries)
+        if not decision.should_retry and decision.next_status == "dead_letter":
+            new_status = "dead_letter"
+
+    # If caller explicitly targeted dead_letter (e.g. NonRetryableError), ensure retry_count reaches max_retries
+    if original_target_status == "dead_letter":
         job.retry_count = job.max_retries
 
     # Validate transition against current state
@@ -64,9 +79,8 @@ async def update_job_status(
 
     # On failure or error
     if error is not None or new_status in ("failed", "dead_letter"):
-        job.error = error or job.error
+        job.error = str(error) if error is not None else job.error
         if new_status == "dead_letter":
-            job.retry_count = job.max_retries
             job.next_retry_at = None
             try:
                 from app.core.metrics import dead_letter_jobs_total
@@ -75,7 +89,11 @@ async def update_job_status(
                 pass
         else:
             job.retry_count += 1
-            delay = compute_backoff_delay(job.retry_count)
+            if error is not None:
+                dec = evaluate_retry_policy(error, retry_count=job.retry_count, max_retries=job.max_retries)
+                delay = dec.delay_seconds
+            else:
+                delay = compute_backoff_delay(job.retry_count)
             job.next_retry_at = now + timedelta(seconds=delay)
 
 

@@ -922,3 +922,115 @@ export async function activatePolicy(id: string): Promise<EnforcementPolicy> {
   if (USE_MOCK) return mockApi.mockActivatePolicy(id);
   return apiFetch(`/policies/${id}/activate`, { method: 'POST' });
 }
+
+// ---------------------------------------------------------------------------
+// Dead Letter Queue (DLQ) Ops (RT-10)
+// ---------------------------------------------------------------------------
+
+export async function getDlqStats(): Promise<import('../types').DlqStats> {
+  if (USE_MOCK) {
+    return {
+      total_dead_letter: 3,
+      by_job_type: { gmail_sync: 2, email_fetch: 1, email_analysis: 0 },
+      oldest_age_hours: 4.5,
+    };
+  }
+  return apiFetch('/dlq/stats');
+}
+
+export async function getDlqJobs(params?: {
+  job_type?: string;
+  from_date?: string;
+  to_date?: string;
+  owner_user_id?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<import('../types').DlqJobsResponse> {
+  if (USE_MOCK) {
+    const mockJobs = [
+      {
+        job_id: 'job-dlq-001',
+        job_type: 'gmail_sync',
+        owner_user_id: 'usr_admin',
+        payload: { user_id: 'usr_admin', account_id: 'acc_123', correlation_id: 'corr-001' },
+        error: 'GmailAuthError: 401 Unauthorized - user revoked OAuth token',
+        retry_count: 0,
+        created_at: new Date(Date.now() - 4.5 * 3600 * 1000).toISOString(),
+        updated_at: new Date(Date.now() - 4.5 * 3600 * 1000).toISOString(),
+        retry_history: [
+          { attempt: 1, error: 'GmailAuthError: 401 Unauthorized', timestamp: new Date(Date.now() - 4.5 * 3600 * 1000).toISOString() }
+        ]
+      },
+      {
+        job_id: 'job-dlq-002',
+        job_type: 'email_fetch',
+        owner_user_id: 'usr_analyst',
+        payload: { user_id: 'usr_analyst', message_id: 'msg_456', correlation_id: 'corr-002' },
+        error: 'MIMECorruptionError: Corrupt boundary delimiters in RFC 2822 payload',
+        retry_count: 0,
+        created_at: new Date(Date.now() - 2.1 * 3600 * 1000).toISOString(),
+        updated_at: new Date(Date.now() - 2.1 * 3600 * 1000).toISOString(),
+        retry_history: [
+          { attempt: 1, error: 'MIMECorruptionError: Corrupt boundary delimiters', timestamp: new Date(Date.now() - 2.1 * 3600 * 1000).toISOString() }
+        ]
+      },
+      {
+        job_id: 'job-dlq-003',
+        job_type: 'gmail_sync',
+        owner_user_id: 'usr_admin',
+        payload: { user_id: 'usr_admin', account_id: 'acc_789', correlation_id: 'corr-003' },
+        error: 'GmailRateLimitError: 429 Too Many Requests - quota exceeded',
+        retry_count: 5,
+        created_at: new Date(Date.now() - 1.2 * 3600 * 1000).toISOString(),
+        updated_at: new Date(Date.now() - 0.2 * 3600 * 1000).toISOString(),
+        retry_history: [
+          { attempt: 1, error: 'GmailRateLimitError 429', timestamp: new Date(Date.now() - 1.2 * 3600 * 1000).toISOString() },
+          { attempt: 5, error: 'GmailRateLimitError 429: max retries exceeded', timestamp: new Date(Date.now() - 0.2 * 3600 * 1000).toISOString() }
+        ]
+      }
+    ];
+    let filtered = mockJobs;
+    if (params?.job_type) {
+      filtered = filtered.filter(j => j.job_type === params.job_type);
+    }
+    return {
+      jobs: filtered,
+      total: filtered.length,
+      limit: params?.limit ?? 50,
+      offset: params?.offset ?? 0
+    };
+  }
+  const query = new URLSearchParams();
+  if (params?.job_type) query.set('job_type', params.job_type);
+  if (params?.from_date) query.set('from_date', params.from_date);
+  if (params?.to_date) query.set('to_date', params.to_date);
+  if (params?.owner_user_id) query.set('owner_user_id', params.owner_user_id);
+  if (params?.limit !== undefined) query.set('limit', String(params.limit));
+  if (params?.offset !== undefined) query.set('offset', String(params.offset));
+  const qs = query.toString();
+  return apiFetch(`/dlq/jobs${qs ? `?${qs}` : ''}`);
+}
+
+export async function getDlqJob(jobId: string): Promise<import('../types').DlqJob> {
+  if (USE_MOCK) {
+    const list = await getDlqJobs();
+    const found = list.jobs.find(j => j.job_id === jobId);
+    if (found) return found;
+    throw new Error('Job not found in mock DLQ');
+  }
+  return apiFetch(`/dlq/jobs/${jobId}`);
+}
+
+export async function retryDlqJob(jobId: string): Promise<{ success: boolean; message: string }> {
+  if (USE_MOCK) {
+    return { success: true, message: `Job ${jobId} reset to queued and re-enqueued` };
+  }
+  return apiFetch(`/dlq/jobs/${jobId}/retry`, { method: 'POST' });
+}
+
+export async function deleteDlqJob(jobId: string): Promise<{ success: boolean; message: string }> {
+  if (USE_MOCK) {
+    return { success: true, message: `Job ${jobId} soft-deleted` };
+  }
+  return apiFetch(`/dlq/jobs/${jobId}`, { method: 'DELETE' });
+}

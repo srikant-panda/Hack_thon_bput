@@ -42,6 +42,7 @@ class CurrentUser(BaseModel):
     full_name: Optional[str] = None
     username: Optional[str] = None
     account_type: str = "user"
+    role: Optional[str] = None
     notification_email: Optional[str] = None
 
 

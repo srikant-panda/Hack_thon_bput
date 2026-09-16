@@ -592,3 +592,36 @@ export interface NotificationLogEntry {
   error_detail: string | null;
   created_at: string | null;
 }
+
+// --- Dead Letter Queue (RT-10) ---
+
+export interface DlqJobRetryHistoryItem {
+  attempt: number;
+  error: string;
+  timestamp: string;
+}
+
+export interface DlqJob {
+  job_id: string;
+  job_type: string;
+  owner_user_id: string;
+  payload: Record<string, any>;
+  error: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+  retry_history?: DlqJobRetryHistoryItem[];
+}
+
+export interface DlqJobsResponse {
+  jobs: DlqJob[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface DlqStats {
+  total_dead_letter: number;
+  by_job_type: Record<string, number>;
+  oldest_age_hours: number;
+}

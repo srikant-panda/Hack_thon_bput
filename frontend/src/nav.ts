@@ -79,6 +79,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/organization', label: 'Organization & Team', icon: Building2, scope: 'org', section: 'org' },
   { to: '/admin/users', label: 'Admin Users', icon: Building2, scope: 'org', section: 'org', adminOnly: true },
   // --- system ---
+  { to: '/dlq', label: 'Dead Letter Queue', icon: Zap, scope: 'both', section: 'system', adminOnly: true },
   { to: '/reports', label: 'Reports', icon: FileBarChart, scope: 'org', section: 'system' },
   { to: '/settings', label: 'Settings', icon: Settings, scope: 'both', section: 'system' },
   { to: '/docs', label: 'Documentation', icon: BookOpen, scope: 'both', section: 'system' },

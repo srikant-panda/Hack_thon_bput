@@ -1031,9 +1031,15 @@ class JobQueue(Base):
             r_count = 0 if retry_count is None else retry_count
             m_retries = 5 if max_retries is None else max_retries
 
+        if from_status == target_status:
+            return True
+        if target_status == "deleted":
+            return True
+        if from_status == "dead_letter":
+            return target_status == "queued"
         if from_status == "queued":
             if target_status == "dead_letter":
-                return r_count >= m_retries
+                return True
             return target_status == "running"
         if from_status == "running":
             if target_status == "completed":
@@ -1041,13 +1047,13 @@ class JobQueue(Base):
             if target_status == "failed":
                 return r_count < m_retries
             if target_status == "dead_letter":
-                return r_count >= m_retries
+                return True
             return False
         if from_status == "failed":
             if target_status == "queued":
                 return r_count < m_retries
             if target_status == "dead_letter":
-                return r_count >= m_retries
+                return True
             return False
         return False
 

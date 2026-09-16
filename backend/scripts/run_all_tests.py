@@ -533,6 +533,14 @@ async def run_tests():
 
     await run_observability_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 30. RT-10 — Dead letter queue ops dashboard + retry/backoff tuning + poison message visibility
+    # -----------------------------------------------------------------------
+    print("\n[Suite 30] RT-10 — DLQ Ops Dashboard, Retry Backoff & Poison Visibility")
+    from test_dlq_ops import run_dlq_ops_tests
+
+    await run_dlq_ops_tests(runner)
+
     return runner.report()
 
 
