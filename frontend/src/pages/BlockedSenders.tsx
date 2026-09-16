@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Ban, Clock, Loader2, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react';
+import { AlertTriangle, Ban, Clock, Loader2, RefreshCw, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
 import * as api from '../services/api';
-import type { BlockedSender } from '../types';
+import type { BlockedSender, TrustedSender } from '../types';
 
 const STATUS_STYLES: Record<string, string> = {
   blocked: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/30',
@@ -19,6 +19,7 @@ function formatWhen(iso: string | null): string {
 export default function BlockedSenders() {
   const isMockMode = api.isMockMode();
   const [blocks, setBlocks] = useState<BlockedSender[]>([]);
+  const [trustedSenders, setTrustedSenders] = useState<TrustedSender[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +29,14 @@ export default function BlockedSenders() {
     setLoading(true);
     setError(null);
     try {
-      setBlocks(await api.listBlockedSenders());
+      const [blocksData, trustedData] = await Promise.all([
+        api.listBlockedSenders(),
+        api.listTrustedSenders(),
+      ]);
+      setBlocks(blocksData);
+      setTrustedSenders(trustedData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load blocked senders');
+      setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -67,6 +73,20 @@ export default function BlockedSenders() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Trust failed');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleUntrust = async (senderId: string, email: string) => {
+    setActionId(senderId);
+    setError(null);
+    try {
+      await api.removeTrustedSender(senderId);
+      setNotice(`${email} removed from your trust list — auto-quarantine will apply to future incoming emails.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove trusted sender');
     } finally {
       setActionId(null);
     }
@@ -176,6 +196,53 @@ export default function BlockedSenders() {
                     </>
                   )}
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Trusted Senders List */}
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-sm backdrop-blur">
+        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+              <ShieldCheck className="h-4 w-4 text-emerald-400" />
+              Trusted Senders{' '}
+              <span className="font-mono text-xs text-zinc-500">({trustedSenders.length})</span>
+            </h2>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              Senders in this list are exempt from auto-quarantine. Incoming emails will still be scanned and scored, but will not be quarantined.
+            </p>
+          </div>
+        </div>
+
+        {trustedSenders.length === 0 ? (
+          <div className="px-5 py-6 text-center text-xs text-zinc-500">
+            No trusted senders. Senders you choose to "Trust" from alerts or blocked senders will appear here.
+          </div>
+        ) : (
+          <div className="divide-y divide-zinc-800">
+            {trustedSenders.map((sender) => (
+              <div key={sender.id} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-sm font-semibold text-zinc-100">{sender.sender_email}</span>
+                  </div>
+                  <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                    {sender.reason || 'trusted'} · added {formatWhen(sender.created_at)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleUntrust(sender.id, sender.sender_email)}
+                  disabled={actionId === sender.id || isMockMode}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {actionId === sender.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                  Remove from Trust List
+                </button>
               </div>
             ))}
           </div>
