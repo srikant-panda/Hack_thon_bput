@@ -1016,6 +1016,8 @@ class JobQueue(Base):
             m_retries = 5 if max_retries is None else max_retries
 
         if from_status == "queued":
+            if target_status == "dead_letter":
+                return r_count >= m_retries
             return target_status == "running"
         if from_status == "running":
             if target_status == "completed":
@@ -1077,6 +1079,26 @@ class ProcessedEmail(Base):
         "completed": set(),
     }
 
+    @property
+    def normalized_email(self) -> Optional[dict[str, Any]]:
+        return (self.signals or {}).get("normalized_email")
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return (self.signals or {}).get("headers", {})
+
+    @property
+    def urls(self) -> list[str]:
+        return (self.signals or {}).get("urls", [])
+
+    @property
+    def size_bytes(self) -> int:
+        return (self.signals or {}).get("size_bytes", 0)
+
+    @property
+    def error(self) -> Optional[str]:
+        return (self.signals or {}).get("error") or (self.signals or {}).get("failure_reason")
+
     @classmethod
     def can_transition(cls_or_self, from_or_to: str, to_status: Optional[str] = None) -> bool:
         if to_status is None:
@@ -1089,4 +1111,5 @@ class ProcessedEmail(Base):
             from_status = from_or_to
             target_status = to_status
         return target_status in cls_or_self.VALID_TRANSITIONS.get(from_status, set())
+
 

@@ -501,6 +501,14 @@ async def run_tests():
 
     await run_gmail_sync_worker_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 26. RT-5 — Email Fetch Worker (Gmail get, MIME parse, normalize, store, enqueue analysis)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 26] RT-5 — Email Fetch Worker")
+    from test_email_fetch_worker import run_email_fetch_worker_tests
+
+    await run_email_fetch_worker_tests(runner)
+
     return runner.report()
 
 

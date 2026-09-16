@@ -64,6 +64,15 @@ class ExternalServiceError(AppError):
         )
 
 
+class NonRetryableError(AppError):
+    """Exception indicating a permanent failure that should not be retried (poison pill protection)."""
+
+    def __init__(self, message: str, reason: str = "non_retryable", details: Optional[Any] = None):
+        super().__init__(message, code=reason, status_code=status.HTTP_400_BAD_REQUEST, details=details)
+        self.reason = reason
+
+
+
 class ComingSoonError(StarletteHTTPException):
     """Frozen-feature marker rendered with the plain FastAPI detail envelope.
 

@@ -44,6 +44,10 @@ async def update_job_status(
     if job is None:
         raise ValueError(f"Job not found: {job_id}")
 
+    # For direct dead_letter transition (e.g. NonRetryableError), ensure retry_count reaches max_retries
+    if new_status == "dead_letter":
+        job.retry_count = job.max_retries
+
     # Validate transition against current state
     if not JobQueue.can_transition(job.status, new_status, job.retry_count, job.max_retries):
         raise ValueError(
@@ -61,12 +65,14 @@ async def update_job_status(
     # On failure or error
     if error is not None or new_status in ("failed", "dead_letter"):
         job.error = error or job.error
-        job.retry_count += 1
         if new_status == "dead_letter":
+            job.retry_count = job.max_retries
             job.next_retry_at = None
         else:
+            job.retry_count += 1
             delay = compute_backoff_delay(job.retry_count)
             job.next_retry_at = now + timedelta(seconds=delay)
+
 
     if result is not None:
         job.result = result

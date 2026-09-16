@@ -28,9 +28,15 @@ def make_email_fetch_job_id(user_id: str, message_id: str) -> str:
     return f"email_fetch:{user_id}:{message_id}"
 
 
+def make_email_analysis_job_id(user_id: str, message_id: str) -> str:
+    """Generate deterministic job ID for email analysis operations."""
+    return f"email_analysis:{user_id}:{message_id}"
+
+
 def make_email_scan_job_id(user_id: str, message_id: str) -> str:
     """Generate deterministic job ID for email scan operations."""
     return f"email_scan:{user_id}:{message_id}"
+
 
 
 async def create_redis_pool(redis_url: str | None = None) -> ArqRedis:

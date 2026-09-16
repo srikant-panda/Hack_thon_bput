@@ -86,6 +86,7 @@ class GmailClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Perform an authorized request with single-retry token refresh on 401."""
+        req_timeout = kwargs.pop("timeout", self._timeout)
         headers = dict(kwargs.pop("headers", {}))
         headers["Authorization"] = f"Bearer {access_token}"
 
@@ -94,10 +95,14 @@ class GmailClient:
             h["Authorization"] = f"Bearer {tok}"
             if self._client is not None:
                 return await self._client.request(method, url, headers=h, **kwargs)
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with httpx.AsyncClient(timeout=req_timeout) as client:
                 return await client.request(method, url, headers=h, **kwargs)
 
-        response = await _execute(access_token)
+        try:
+            response = await _execute(access_token)
+        except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
+            logger.warning("Gmail API request timeout: %s", exc)
+            raise GmailServerError(f"Gmail request timeout: {exc}", status_code=504) from exc
 
         # Token refresh on 401 if refresh_token is available
         if response.status_code == 401 and refresh_token:
@@ -149,3 +154,19 @@ class GmailClient:
         """Call GET https://gmail.googleapis.com/gmail/v1/users/me/profile."""
         url = f"{GMAIL_API_BASE}/users/me/profile"
         return await self._request("GET", url, access_token, refresh_token=refresh_token)
+
+    async def get_message(
+        self,
+        access_token: str,
+        message_id: str,
+        format: str = "full",
+        timeout: Optional[float] = None,
+        refresh_token: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Call GET https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}?format={format}."""
+        url = f"{GMAIL_API_BASE}/users/me/messages/{message_id}?format={format}"
+        req_kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            req_kwargs["timeout"] = timeout
+        return await self._request("GET", url, access_token, refresh_token=refresh_token, **req_kwargs)
+
