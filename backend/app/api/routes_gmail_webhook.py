@@ -42,6 +42,33 @@ async def gmail_pubsub_webhook(request: Request) -> dict[str, Any]:
         account = (await db.execute(stmt)).scalar_one_or_none()
 
         if account is None:
+            # Fallback: auto-register from connected EmailConnectorAccount if available
+            from app.db.models import EmailConnectorAccount
+            from app.core.crypto import decrypt_secret
+            from app.services.gmail_account_service import get_or_create_gmail_account
+
+            conn_stmt = select(EmailConnectorAccount).where(
+                EmailConnectorAccount.provider == "gmail",
+                EmailConnectorAccount.provider_email == email_address,
+                EmailConnectorAccount.status == "connected",
+            )
+            connector = (await db.execute(conn_stmt)).scalar_one_or_none()
+            if connector and connector.refresh_token_enc:
+                try:
+                    access_token = decrypt_secret(connector.access_token_enc) if connector.access_token_enc else None
+                    refresh_token = decrypt_secret(connector.refresh_token_enc)
+                    account = await get_or_create_gmail_account(
+                        db,
+                        owner_user_id=connector.owner_user_id,
+                        email=email_address,
+                        access_token=access_token,
+                        refresh_token=refresh_token,
+                    )
+                    logger.info("Auto-registered GmailAccount from connector for %s", email_address)
+                except Exception:
+                    logger.exception("Failed to auto-register GmailAccount from connector")
+
+        if account is None:
             logger.warning("Pub/Sub notification received for unknown email: %s", email_address)
             return {"status": "ignored", "reason": "unknown_email"}
 

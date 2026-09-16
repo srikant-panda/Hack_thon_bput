@@ -218,6 +218,21 @@ async def handle_gmail_callback(code: str, state: str) -> EmailConnectorAccount:
         await session.refresh(connector)
         connector_id = connector.id
 
+        # Also register or update in GmailAccount for real-time Pub/Sub background workers
+        try:
+            from app.services.gmail_account_service import get_or_create_gmail_account
+
+            await get_or_create_gmail_account(
+                session,
+                owner_user_id=owner_user_id,
+                email=provider_email,
+                access_token=access_token,
+                refresh_token=refresh_token,
+            )
+            logger.info("Mirrored Gmail connector to gmail_accounts for %s", provider_email)
+        except Exception:
+            logger.exception("Failed to mirror connector to gmail_accounts for %s", provider_email)
+
     await log_connector_operation_admin(
         owner_user_id=owner_user_id,
         provider="gmail",
