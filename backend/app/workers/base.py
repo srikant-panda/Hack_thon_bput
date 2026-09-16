@@ -118,8 +118,8 @@ async def get_db_session(ctx: dict[str, Any]):
 
     db_maker = ctx.get("db_maker")
     if db_maker is None:
-        from app.db.session import async_session_maker
-        db_maker = async_session_maker
+        from app.db.admin import _get_admin_session_maker
+        db_maker = _get_admin_session_maker()
 
     async with db_maker() as session:
         yield session
@@ -127,9 +127,9 @@ async def get_db_session(ctx: dict[str, Any]):
 
 async def base_startup(ctx: dict[str, Any]) -> None:
     """Initialize resources on worker startup."""
-    from app.db.session import async_session_maker
+    from app.db.admin import _get_admin_session_maker
 
-    ctx["db_maker"] = async_session_maker
+    ctx["db_maker"] = _get_admin_session_maker()
     logger = get_worker_logger("cyberguard.worker")
     ctx["logger"] = logger
     log_worker_event(logger, logging.INFO, "Worker process started", job_type="lifecycle")
@@ -157,3 +157,19 @@ class WorkerSettings:
 
     on_startup = base_startup
     on_shutdown = base_shutdown
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        base_attrs = [
+            "redis_settings",
+            "queue_name",
+            "max_jobs",
+            "job_timeout",
+            "retry_jobs",
+            "max_tries",
+            "on_startup",
+            "on_shutdown",
+        ]
+        for attr in base_attrs:
+            if attr not in cls.__dict__ and hasattr(WorkerSettings, attr):
+                setattr(cls, attr, getattr(WorkerSettings, attr))

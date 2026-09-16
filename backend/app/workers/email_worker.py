@@ -171,6 +171,9 @@ async def email_analysis_job(ctx: dict[str, Any], processed_email_id: str) -> di
         return result
 
 
+from arq.worker import func
+
+
 class WorkerFunctionsList(list):
     """List subclass preserving backward compatibility for skeleton inspection."""
 
@@ -183,4 +186,18 @@ class WorkerFunctionsList(list):
 class WorkerSettings(BaseWorkerSettings):
     """Worker settings for general email analysis and autonomous SOAR enforcement."""
 
-    functions: list[Any] = WorkerFunctionsList([email_fetch_job, email_analysis_job])
+    @classmethod
+    def _build_functions(cls) -> list[Any]:
+        from app.workers.gmail_worker import gmail_sync_job
+        return [
+            func(email_fetch_job, name="email_fetch"),
+            email_fetch_job,
+            func(email_analysis_job, name="email_analysis"),
+            email_analysis_job,
+            func(gmail_sync_job, name="gmail_sync"),
+            gmail_sync_job,
+        ]
+
+    functions: list[Any] = WorkerFunctionsList()
+
+WorkerSettings.functions = WorkerFunctionsList(WorkerSettings._build_functions())

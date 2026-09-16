@@ -95,6 +95,9 @@ async def gmail_sync_job(
         return result
 
 
+from arq.worker import func
+
+
 class WorkerFunctionsList(list):
     """List subclass preserving backward compatibility for skeleton inspection."""
 
@@ -107,5 +110,19 @@ class WorkerFunctionsList(list):
 class WorkerSettings(BaseWorkerSettings):
     """Worker settings for Gmail real-time ingestion and synchronization."""
 
-    functions: list[Any] = WorkerFunctionsList([gmail_sync_job])
+    @classmethod
+    def _build_functions(cls) -> list[Any]:
+        from app.workers.email_worker import email_analysis_job, email_fetch_job
+        return [
+            func(gmail_sync_job, name="gmail_sync"),
+            gmail_sync_job,
+            func(email_fetch_job, name="email_fetch"),
+            email_fetch_job,
+            func(email_analysis_job, name="email_analysis"),
+            email_analysis_job,
+        ]
+
+    functions: list[Any] = WorkerFunctionsList()
+
+WorkerSettings.functions = WorkerFunctionsList(WorkerSettings._build_functions())
 
