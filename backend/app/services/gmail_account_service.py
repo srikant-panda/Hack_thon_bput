@@ -56,12 +56,27 @@ async def get_or_create_gmail_account(
     return account
 
 
+def is_greater_history_id(new_id: Optional[str], old_id: Optional[str]) -> bool:
+    """Compare two history IDs, treating them as integers when numeric."""
+    if new_id is None:
+        return False
+    if old_id is None:
+        return True
+    try:
+        return int(new_id) > int(old_id)
+    except (ValueError, TypeError):
+        return str(new_id) > str(old_id)
+
+
 async def update_history_id(
     db: AsyncSession,
     gmail_account_id: str,
     new_history_id: str,
 ) -> GmailAccount:
-    """Update last_history_id using a SELECT ... FOR UPDATE row lock to serialize concurrent updates."""
+    """Update last_history_id using a SELECT ... FOR UPDATE row lock to serialize concurrent updates.
+
+    Only updates last_history_id if new_history_id > current last_history_id.
+    """
     stmt = (
         select(GmailAccount)
         .where(GmailAccount.id == gmail_account_id)
@@ -69,7 +84,8 @@ async def update_history_id(
     )
     account = (await db.execute(stmt)).scalar_one()
     now = datetime.now(timezone.utc)
-    account.last_history_id = new_history_id
+    if is_greater_history_id(new_history_id, account.last_history_id):
+        account.last_history_id = str(new_history_id)
     account.last_sync_at = now
     account.updated_at = now
     await db.commit()

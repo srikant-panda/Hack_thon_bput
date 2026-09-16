@@ -493,7 +493,16 @@ async def run_tests():
 
     await run_gmail_webhook_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 25. RT-4 — Gmail Sync Worker (history.list, message discovery, FOR UPDATE lock)
+    # -----------------------------------------------------------------------
+    print("\n[Suite 25] RT-4 — Gmail Sync Worker")
+    from test_gmail_sync_worker import run_gmail_sync_worker_tests
+
+    await run_gmail_sync_worker_tests(runner)
+
     return runner.report()
+
 
 
 

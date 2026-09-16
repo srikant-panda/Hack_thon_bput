@@ -23,6 +23,11 @@ def make_gmail_sync_job_id(user_id: str, history_id: str | int) -> str:
     return f"gmail_sync:{user_id}:{history_id}"
 
 
+def make_email_fetch_job_id(user_id: str, message_id: str) -> str:
+    """Generate deterministic job ID for email fetch operations."""
+    return f"email_fetch:{user_id}:{message_id}"
+
+
 def make_email_scan_job_id(user_id: str, message_id: str) -> str:
     """Generate deterministic job ID for email scan operations."""
     return f"email_scan:{user_id}:{message_id}"

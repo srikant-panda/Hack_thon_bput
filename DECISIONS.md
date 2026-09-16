@@ -326,5 +326,8 @@ consequences. Newest entries at the bottom.
   3. **Why token-bucket rate limiting (Gmail API quota protection):**
      Google Cloud enforces strict per-user rate limits on Gmail API calls (250 requests/second/user). Sudden webhook bursts could trigger HTTP 429 quota exhaustion and cause transient sync failures. An in-memory token bucket per `(owner_user_id, "gmail_sync")` detects exhaustion and automatically enqueues jobs with a 5-second deferral (`defer_by=5s`), smoothing burst traffic while protecting API quota.
 
-
-
+- **2026-09-16 — RT-4: Gmail sync worker with history.list discovery and row-locked state updates (RT Phase).**
+  1. **Why `users.history.list` over direct message listing (`users.messages.list`):**
+     Querying `users.messages.list` with date/label filters requires scanning the user's mailbox and repeatedly evaluating full message lists, which wastes quota, scales poorly with inbox size, and easily misses or misorders messages during rapid delivery spikes. In contrast, Google Cloud Pub/Sub push notifications deliver exact `historyId` checkpoints. Gmail's `users.history.list(startHistoryId=...)` yields an exact, delta-only audit trail of mailbox changes (`messagesAdded`) since the checkpoint. This minimizes Gmail API quota consumption, drastically lowers latency, and guarantees exact-delta ingestion.
+  2. **Why `SELECT ... FOR UPDATE` row locks on `gmail_accounts`:**
+     Gmail push notifications arrive frequently during active email sessions, often resulting in concurrent webhook delivery and multiple worker processes attempting to sync the same mailbox simultaneously. Without database row locks, concurrent sync tasks would encounter race conditions where an older sync execution could overwrite `last_history_id` with an earlier checkpoint (lost update) or fetch overlapping messages redundantly. A `SELECT ... FOR UPDATE` lock serializes sync execution for a given mailbox while allowing independent mailboxes to process in parallel. Combined with monotonic history ID comparisons (`new > old`), this ensures mailbox state always progresses forward without regression.

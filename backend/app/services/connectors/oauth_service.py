@@ -240,3 +240,11 @@ async def handle_gmail_callback(code: str, state: str) -> EmailConnectorAccount:
             operation_detail=f"Gmail mailbox {provider_email} connected (scopes: {', '.join(scopes)})",
         )
     return connector
+
+
+async def refresh_token(refresh_token: str) -> dict:
+    """Refresh an access token using a Google OAuth refresh token."""
+    from app.services.connectors.token_manager import _refresh_access_token
+
+    return await _refresh_access_token(refresh_token)
+
