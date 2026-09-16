@@ -403,6 +403,7 @@ async def run_enforcement_tests(runner: TestRunner) -> None:
                 id=autoscan_conn, owner_user_id=autoscan_owner, provider="autoscan_stub",
                 provider_email=f"{autoscan_owner}@stub.test", status="connected",
                 access_token_enc=encrypt_secret("autoscan-token"),
+                refresh_token_enc=encrypt_secret("autoscan-refresh"),
                 access_token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
             ))
             await db.commit()
