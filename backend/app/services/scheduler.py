@@ -170,11 +170,15 @@ async def run_expiry_once() -> dict:
                 stats["blocks_expired"] += 1
             except (EmailProviderError, TokenRefreshError, RuntimeError) as exc:
                 block.last_error = f"{type(exc).__name__}: {getattr(exc, 'message', exc)}"
-                # An undecryptable stored token (CONNECTOR_TOKEN_KEY rotated) is
-                # permanently unrecoverable: mark the connector reauth_required
-                # so the UI shows "reconnect needed" and this pass stops
-                # retrying the same dead row every cycle.
-                if isinstance(exc, RuntimeError) and "cannot be decrypted" in str(exc):
+                # Permanently unrecoverable states (rotated CONNECTOR_TOKEN_KEY,
+                # missing refresh token): mark the connector reauth_required so
+                # the UI shows "reconnect needed" and this pass stops retrying
+                # the same dead row every cycle.
+                unrecoverable = (
+                    (isinstance(exc, RuntimeError) and "cannot be decrypted" in str(exc))
+                    or (isinstance(exc, TokenRefreshError) and exc.error_class == "reauth_required")
+                )
+                if unrecoverable:
                     connector_row = await db.get(EmailConnectorAccount, block.connector_id)
                     if connector_row is not None:
                         connector_row.status = "reauth_required"
@@ -218,7 +222,25 @@ async def run_auto_scan_once() -> dict:
                 connector = await db.get(EmailConnectorAccount, conn_id)
                 if connector is None or connector.status != "connected":
                     continue
-                token = await get_valid_access_token(connector, db)
+                if not connector.refresh_token_enc:
+                    # Without a refresh token the mailbox can never be polled
+                    # again — retire it instead of warning every pass.
+                    connector.status = "reauth_required"
+                    connector.last_error = "No refresh token stored — reconnect this mailbox."
+                    await db.commit()
+                    logger.info("Auto-scan: connector %s marked reauth_required (no refresh token)", conn_id)
+                    continue
+                try:
+                    token = await get_valid_access_token(connector, db)
+                except RuntimeError as exc:
+                    if "cannot be decrypted" in str(exc):
+                        # CONNECTOR_TOKEN_KEY rotated — permanently unrecoverable.
+                        connector.status = "reauth_required"
+                        connector.last_error = str(exc)
+                        await db.commit()
+                        logger.info("Auto-scan: connector %s marked reauth_required (undecryptable token)", conn_id)
+                        continue
+                    raise
                 provider = get_provider(connector.provider)
                 caps = provider.capabilities or {}
                 if isinstance(caps, dict) and not caps.get("supports_read", True):
@@ -295,6 +317,16 @@ async def _auto_scan_loop() -> None:
         await asyncio.sleep(AUTO_SCAN_INTERVAL_SECONDS)
 
 
+async def _loop() -> None:
+    while True:
+        try:
+            await run_expiry_once()
+        except Exception:  # noqa: BLE001 - the scheduler must never crash the loop
+            logger.exception("Expiry scheduler pass failed")
+        await asyncio.sleep(INTERVAL_SECONDS)
+
+
+_running_task: asyncio.Task | None = None
 _auto_scan_task: asyncio.Task | None = None
 
 
