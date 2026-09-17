@@ -43,8 +43,6 @@ export default function DLQDashboard() {
   const [isPolling, setIsPolling] = useState(false);
   const [liveEventsCount, setLiveEventsCount] = useState(0);
 
-  const isMockMode = import.meta.env.VITE_USE_MOCK !== 'false';
-
   // Copy helper
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -85,10 +83,6 @@ export default function DLQDashboard() {
 
   // Realtime subscription setup
   useEffect(() => {
-    if (isMockMode) {
-      return;
-    }
-
     let supabase: any = null;
     try {
       supabase = getSupabase();
@@ -132,7 +126,7 @@ export default function DLQDashboard() {
       supabase.removeChannel(channel);
       clearInterval(pollInterval);
     };
-  }, [isMockMode, fetchData]);
+  }, [fetchData]);
 
   // Actions: Retry
   const handleRetry = async (jobId: string) => {
@@ -237,12 +231,7 @@ export default function DLQDashboard() {
         actions={
           <div className="flex items-center gap-3">
             {/* Realtime / Polling indicator */}
-            {isMockMode ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300">
-                <span className="h-2 w-2 rounded-full bg-amber-400" />
-                DEMO MODE
-              </span>
-            ) : isRealtimeConnected ? (
+            {isRealtimeConnected ? (
               <span
                 title="Subscribed to live job_queue status changes"
                 className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-400"

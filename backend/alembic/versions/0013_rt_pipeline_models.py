@@ -71,7 +71,7 @@ def upgrade() -> None:
                 owner_user_id VARCHAR(64) NOT NULL REFERENCES {SCHEMA}.users(id) ON DELETE CASCADE,
                 job_type VARCHAR(32) NOT NULL CHECK (job_type IN ('gmail_sync', 'email_fetch', 'email_analysis', 'email_result')),
                 job_id VARCHAR(255) NOT NULL UNIQUE,
-                status VARCHAR(32) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed', 'dead_letter')),
+                status VARCHAR(32) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed', 'dead_letter', 'deleted')),
                 retry_count INTEGER NOT NULL DEFAULT 0,
                 max_retries INTEGER NOT NULL DEFAULT 5,
                 payload JSONB NOT NULL DEFAULT '{{}}'::jsonb,

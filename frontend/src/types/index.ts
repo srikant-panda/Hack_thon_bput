@@ -85,7 +85,6 @@ export interface AnalysisResult {
   timestamp: string;
   status: EventStatus;
   // Optional extras produced by specific detectors
-  redirectChain?: string[];
   authenticityScore?: number;
   manipulationProbability?: number;
   lexicalFeatures?: { feature: string; value: string; riskContribution: number }[];

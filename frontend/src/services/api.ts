@@ -34,8 +34,6 @@ import type {
   NotificationLogEntry,
   TrustedSender,
   ReleaseAndTrustResult,} from '../types';
-import * as mockApi from './mockApi';
-import { db, addAuditLog } from './mockData';
 import { ApiError, apiFetch } from './http';
 import {
   mapAlert,
@@ -49,23 +47,11 @@ import {
 import { useAuthStore } from '../store/authStore';
 
 // ---------------------------------------------------------------------------
-// Service facade — the ONLY module pages import.
-// USE_MOCK=true  -> delegate to the in-browser mock API (no behaviour change).
-// USE_MOCK=false -> live Supabase Auth + real backend at VITE_API_BASE_URL.
-// Raw log listing endpoints (login events, network flows, API logs) have no
-// backend counterpart yet and still fall back to the mock layer with a
-// console warning.
+// Service facade — the ONLY module pages import. Every call goes to the live
+// backend at VITE_API_BASE_URL (Supabase Auth handled by the auth store).
 // ---------------------------------------------------------------------------
 
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
-
-function notYetIntegrated<T>(functionName: string, mockCall: () => Promise<T>): Promise<T> {
-  console.warn('[CYBERGUARD] endpoint not yet integrated, using mock:', functionName);
-  return mockCall();
-}
-
 export async function login(email: string, password: string): Promise<{ user: User; token: string }> {
-  if (USE_MOCK) return mockApi.mockLogin(email, password);
   // Real login is performed by the auth store via Supabase Auth.
   await useAuthStore.getState().login(email, password);
   const state = useAuthStore.getState();
@@ -77,20 +63,14 @@ export async function loginWithOAuth(provider: 'google' | 'github'): Promise<voi
 }
 
 export async function logout(): Promise<void> {
-  if (USE_MOCK) {
-    await useAuthStore.getState().logout();
-    return;
-  }
   await useAuthStore.getState().logout();
 }
 
 export async function getUserProfile(): Promise<UserContext> {
-  if (USE_MOCK) return mockApi.mockGetUserContext();
   return apiFetch('/auth/me');
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  if (USE_MOCK) return mockApi.mockGetDashboardSummary();
   const row = await apiFetch('/dashboard/summary');
   return mapDashboardSummary(row);
 }
@@ -103,7 +83,6 @@ export async function listAlerts(filters?: {
   limit?: number;
   offset?: number;
 }): Promise<Alert[]> {
-  if (USE_MOCK) return mockApi.mockListAlerts(filters);
   const params = new URLSearchParams();
   if (filters?.severity) params.set('severity', filters.severity);
   if (filters?.module) params.set('module', filters.module);
@@ -116,7 +95,6 @@ export async function listAlerts(filters?: {
 }
 
 export async function getAlert(id: string): Promise<Alert | null> {
-  if (USE_MOCK) return mockApi.mockGetAlert(id);
   try {
     const row = await apiFetch(`/alerts/${id}`);
     return row ? mapAlert(row) : null;
@@ -127,19 +105,6 @@ export async function getAlert(id: string): Promise<Alert | null> {
 }
 
 export async function updateAlertStatus(id: string, status: Alert['status']): Promise<Alert> {
-  if (USE_MOCK) {
-    const alert = db.alerts.find((a) => a.id === id);
-    if (!alert) throw new Error(`Alert ${id} not found`);
-    alert.status = status;
-    addAuditLog({
-      userId: 'USR-001',
-      userName: 'admin@cyberguard.local',
-      action: 'UPDATE_ALERT_STATUS',
-      resource: id,
-      details: `Alert status changed to ${status}`,
-    });
-    return alert;
-  }
   const row = await apiFetch(`/alerts/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
@@ -152,7 +117,6 @@ export async function updateAlertStatus(id: string, status: Alert['status']): Pr
 // ---------------------------------------------------------------------------
 
 export async function analyzeEmail(sender: string, subject: string, body: string): Promise<AnalysisResult> {
-  if (USE_MOCK) return mockApi.mockAnalyzeEmail(sender, subject, body);
   const row = await apiFetch('/analysis/email', {
     method: 'POST',
     body: JSON.stringify({ sender, subject, body }),
@@ -161,13 +125,11 @@ export async function analyzeEmail(sender: string, subject: string, body: string
 }
 
 export async function analyzeUrl(url: string): Promise<AnalysisResult> {
-  if (USE_MOCK) return mockApi.mockAnalyzeUrl(url);
   const row = await apiFetch('/analysis/url', { method: 'POST', body: JSON.stringify({ url }) });
   return mapAnalysisResult(row);
 }
 
 export async function analyzeImpersonation(message: string, claimedIdentity: string): Promise<AnalysisResult> {
-  if (USE_MOCK) return mockApi.mockAnalyzeImpersonation(message, claimedIdentity);
   const row = await apiFetch('/analysis/impersonation', {
     method: 'POST',
     body: JSON.stringify({ message, claimed_identity: claimedIdentity }),
@@ -176,7 +138,6 @@ export async function analyzeImpersonation(message: string, claimedIdentity: str
 }
 
 export async function analyzeMedia(file: File): Promise<AnalysisResult> {
-  if (USE_MOCK) return mockApi.mockAnalyzeMedia({ name: file.name, size: file.size, type: file.type });
   // Multipart upload: no Content-Type header so the browser sets the boundary.
   const formData = new FormData();
   formData.append('file', file);
@@ -187,7 +148,6 @@ export async function analyzeMedia(file: File): Promise<AnalysisResult> {
 export async function analyzeAuthLog(
   events: Array<{ user: string; ip: string; location: string; device: string; status: string; timestamp: string }>
 ): Promise<AnalysisResult> {
-  if (USE_MOCK) return mockApi.mockAnalyzeAuthLog(events);
   const row = await apiFetch('/analysis/account-takeover', {
     method: 'POST',
     body: JSON.stringify({ events }),
@@ -199,7 +159,6 @@ export async function analyzeNetworkFlow(
   flows: Array<{ sourceIp: string; destIp: string; port: number; bytesOut: number; protocol: string }>,
   apiLogs: Array<{ endpoint: string; method: string; statusCode: number; sourceIp: string }> = []
 ): Promise<AnalysisResult> {
-  if (USE_MOCK) return mockApi.mockAnalyzeNetworkFlow(flows);
   const row = await apiFetch('/analysis/network', {
     method: 'POST',
     body: JSON.stringify({ flows, api_logs: apiLogs }),
@@ -210,7 +169,6 @@ export async function analyzeNetworkFlow(
 export async function analyzeApiLog(
   logs: Array<{ endpoint: string; method: string; statusCode: number; sourceIp: string }>
 ): Promise<AnalysisResult> {
-  if (USE_MOCK) return mockApi.mockAnalyzeApiLog(logs);
   const row = await apiFetch('/analysis/network', {
     method: 'POST',
     body: JSON.stringify({ flows: [], api_logs: logs }),
@@ -223,13 +181,11 @@ export async function analyzeApiLog(
 // ---------------------------------------------------------------------------
 
 export async function listIncidents(): Promise<Incident[]> {
-  if (USE_MOCK) return mockApi.mockListIncidents();
   const rows = await apiFetch('/incidents');
   return (Array.isArray(rows) ? rows : []).map(mapIncident);
 }
 
 export async function getIncident(id: string): Promise<Incident | null> {
-  if (USE_MOCK) return mockApi.mockGetIncident(id);
   try {
     const row = await apiFetch(`/incidents/${id}`);
     return row ? mapIncident(row) : null;
@@ -240,7 +196,6 @@ export async function getIncident(id: string): Promise<Incident | null> {
 }
 
 export async function createIncident(alertId: string): Promise<Incident> {
-  if (USE_MOCK) return mockApi.mockCreateIncident(alertId);
   // The incidents endpoint derives its title/severity from the linked alert.
   const alert = await getAlert(alertId).catch(() => null);
   const row = await apiFetch('/incidents', {
@@ -255,7 +210,6 @@ export async function createIncident(alertId: string): Promise<Incident> {
 }
 
 export async function updateIncidentStatus(id: string, status: IncidentStatus): Promise<Incident> {
-  if (USE_MOCK) return mockApi.mockUpdateIncidentStatus(id, status);
   const row = await apiFetch(`/incidents/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
@@ -264,7 +218,6 @@ export async function updateIncidentStatus(id: string, status: IncidentStatus): 
 }
 
 export async function assignIncident(id: string, analyst: string): Promise<Incident> {
-  if (USE_MOCK) return mockApi.mockAssignIncident(id, analyst);
   const row = await apiFetch(`/incidents/${id}/assign`, {
     method: 'PATCH',
     body: JSON.stringify({ assigned_to: analyst }),
@@ -273,7 +226,6 @@ export async function assignIncident(id: string, analyst: string): Promise<Incid
 }
 
 export async function escalateIncident(id: string, reason?: string): Promise<Incident> {
-  if (USE_MOCK) return mockApi.mockEscalateIncident(id);
   const row = await apiFetch(`/incidents/${id}/escalate`, {
     method: 'POST',
     body: JSON.stringify({ reason: reason ?? 'Escalated from the SOC console' }),
@@ -286,13 +238,11 @@ export async function escalateIncident(id: string, reason?: string): Promise<Inc
 // ---------------------------------------------------------------------------
 
 export async function listResponseCatalog(): Promise<ResponseActionCatalog[]> {
-  if (USE_MOCK) return mockApi.mockListResponseCatalog();
   const rows = await apiFetch('/responses/catalog');
   return (Array.isArray(rows) ? rows : []).map(mapResponseCatalog);
 }
 
 export async function executeResponse(actionId: string, target: string, approved: boolean): Promise<ResponseExecution> {
-  if (USE_MOCK) return mockApi.mockExecuteResponse(actionId, target, approved);
   const row = await apiFetch('/responses/execute', {
     method: 'POST',
     body: JSON.stringify({ catalog_id: actionId, target, approved }),
@@ -301,7 +251,6 @@ export async function executeResponse(actionId: string, target: string, approved
 }
 
 export async function listResponseHistory(): Promise<ResponseExecution[]> {
-  if (USE_MOCK) return mockApi.mockListResponseHistory();
   const rows = await apiFetch('/responses/history');
   return (Array.isArray(rows) ? rows : []).map(mapResponseExecution);
 }
@@ -311,25 +260,25 @@ export async function listResponseHistory(): Promise<ResponseExecution[]> {
 // ---------------------------------------------------------------------------
 
 export async function listAuditLogs(actorType?: string): Promise<AuditLog[]> {
-  if (USE_MOCK) return mockApi.mockListAuditLogs();
   const suffix = actorType ? `&actor_type=${encodeURIComponent(actorType)}` : '';
   const rows = await apiFetch(`/audit/logs?limit=200${suffix}`);
   return (Array.isArray(rows) ? rows : []).map(mapAuditLog);
 }
 
+async function notAvailable(functionName: string): Promise<never> {
+  throw new Error(`${functionName} has no backend endpoint yet`);
+}
+
 export async function listLoginEvents(): Promise<import('../types').LoginEvent[]> {
-  if (USE_MOCK) return mockApi.mockListLoginEvents();
-  return notYetIntegrated('listLoginEvents', () => mockApi.mockListLoginEvents());
+  return notAvailable('listLoginEvents');
 }
 
 export async function listNetworkFlows(): Promise<import('../types').NetworkFlow[]> {
-  if (USE_MOCK) return mockApi.mockListNetworkFlows();
-  return notYetIntegrated('listNetworkFlows', () => mockApi.mockListNetworkFlows());
+  return notAvailable('listNetworkFlows');
 }
 
 export async function listApiLogs(): Promise<import('../types').ApiLogEntry[]> {
-  if (USE_MOCK) return mockApi.mockListApiLogs();
-  return notYetIntegrated('listApiLogs', () => mockApi.mockListApiLogs());
+  return notAvailable('listApiLogs');
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +286,6 @@ export async function listApiLogs(): Promise<import('../types').ApiLogEntry[]> {
 // ---------------------------------------------------------------------------
 
 export async function assistantChat(message: string): Promise<string> {
-  if (USE_MOCK) return mockApi.mockAssistantChat(message);
   const row = await apiFetch('/assistant/chat', {
     method: 'POST',
     body: JSON.stringify({ message }),
@@ -346,9 +294,8 @@ export async function assistantChat(message: string): Promise<string> {
   return String(record.reply ?? 'The assistant is temporarily unable to generate a response.');
 }
 
-export async function addAlert(alert: Alert): Promise<void> {
-  if (USE_MOCK) return mockApi.mockAddAlert(alert);
-  return notYetIntegrated('addAlert', async () => mockApi.mockAddAlert(alert));
+export async function addAlert(_alert: Alert): Promise<void> {
+  return notAvailable('addAlert');
 }
 
 // ---------------------------------------------------------------------------
@@ -356,26 +303,11 @@ export async function addAlert(alert: Alert): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function listOrganizations(): Promise<Organization[]> {
-  if (USE_MOCK) {
-    const ctx = await mockApi.mockGetUserContext();
-    return ctx.organizations;
-  }
   const rows = await apiFetch('/organizations');
   return Array.isArray(rows) ? (rows as Organization[]) : [];
 }
 
 export async function createOrganization(name: string): Promise<Organization> {
-  if (USE_MOCK) {
-    const newOrg: Organization = {
-      id: `org-${Date.now()}`,
-      name,
-      slug: name.toLowerCase().replace(/\s+/g, '-'),
-      is_personal: false,
-      role: 'admin',
-      created_at: new Date().toISOString(),
-    };
-    return newOrg;
-  }
   const org = await apiFetch('/organizations', {
     method: 'POST',
     body: JSON.stringify({ name }),
@@ -385,54 +317,11 @@ export async function createOrganization(name: string): Promise<Organization> {
 }
 
 export async function getOrganization(orgId: string): Promise<Organization> {
-  if (USE_MOCK) {
-    const ctx = await mockApi.mockGetUserContext();
-    const found = ctx.organizations.find((o) => o.id === orgId);
-    if (found) return found;
-    return {
-      id: ctx.active_organization.id,
-      name: ctx.active_organization.name,
-      slug: 'active-org',
-      is_personal: ctx.active_organization.is_personal,
-      role: ctx.active_organization.role,
-    };
-  }
   const org = await apiFetch(`/organizations/${orgId}`);
   return org as Organization;
 }
 
 export async function listOrganizationMembers(orgId: string): Promise<OrganizationMember[]> {
-  if (USE_MOCK) {
-    return [
-      {
-        id: 'mem-1',
-        organizationId: orgId,
-        userId: 'u-1',
-        email: 'admin@cyberguard.local',
-        fullName: 'Lead Analyst (Admin)',
-        role: 'admin',
-        joinedAt: new Date(Date.now() - 86400000 * 30).toISOString(),
-      },
-      {
-        id: 'mem-2',
-        organizationId: orgId,
-        userId: 'u-2',
-        email: 'analyst@cyberguard.local',
-        fullName: 'Security Analyst',
-        role: 'analyst',
-        joinedAt: new Date(Date.now() - 86400000 * 14).toISOString(),
-      },
-      {
-        id: 'mem-3',
-        organizationId: orgId,
-        userId: 'u-3',
-        email: 'auditor@cyberguard.local',
-        fullName: 'SOC Auditor',
-        role: 'viewer',
-        joinedAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-      },
-    ];
-  }
   const rows = await apiFetch(`/organizations/${orgId}/members`);
   if (!Array.isArray(rows)) return [];
   return rows.map((r: any) => ({
@@ -451,17 +340,6 @@ export async function addOrganizationMember(
   email: string,
   role: OrganizationRole
 ): Promise<OrganizationMember> {
-  if (USE_MOCK) {
-    return {
-      id: `mem-${Date.now()}`,
-      organizationId: orgId,
-      userId: `user-${Date.now()}`,
-      email,
-      fullName: email.split('@')[0],
-      role,
-      joinedAt: new Date().toISOString(),
-    };
-  }
   const res = await apiFetch(`/organizations/${orgId}/members`, {
     method: 'POST',
     body: JSON.stringify({ email, role }),
@@ -482,15 +360,6 @@ export async function updateOrganizationMemberRole(
   targetUserId: string,
   role: OrganizationRole
 ): Promise<OrganizationMember> {
-  if (USE_MOCK) {
-    return {
-      id: `mem-${targetUserId}`,
-      organizationId: orgId,
-      userId: targetUserId,
-      role,
-      joinedAt: new Date().toISOString(),
-    };
-  }
   const res = await apiFetch(`/organizations/${orgId}/members/${targetUserId}`, {
     method: 'PATCH',
     body: JSON.stringify({ role }),
@@ -507,7 +376,6 @@ export async function updateOrganizationMemberRole(
 }
 
 export async function removeOrganizationMember(orgId: string, targetUserId: string): Promise<void> {
-  if (USE_MOCK) return;
   await apiFetch(`/organizations/${orgId}/members/${targetUserId}`, {
     method: 'DELETE',
   });
@@ -530,14 +398,6 @@ export interface AdminUser {
 }
 
 export async function listAdminUsers(): Promise<AdminUser[]> {
-  if (USE_MOCK) {
-    await new Promise((r) => setTimeout(r, 200));
-    return [
-      { id: 'USR-001', email: 'admin@cyberguard.local', full_name: 'SOC Administrator', role: 'admin', created_at: new Date('2026-01-05').toISOString() },
-      { id: 'USR-002', email: 'analyst@cyberguard.local', full_name: 'Demo Analyst', role: 'analyst', created_at: new Date('2026-01-06').toISOString() },
-      { id: 'USR-003', email: 'viewer@cyberguard.local', full_name: 'Demo Viewer', role: 'viewer', created_at: new Date('2026-01-07').toISOString() },
-    ];
-  }
   const rows = await apiFetch('/admin/users');
   return (Array.isArray(rows) ? rows : []) as AdminUser[];
 }
@@ -546,10 +406,6 @@ export async function updateUserRole(
   userId: string,
   role: 'viewer' | 'analyst' | 'admin'
 ): Promise<AdminUser> {
-  if (USE_MOCK) {
-    await new Promise((r) => setTimeout(r, 200));
-    return { id: userId, email: null, full_name: null, role, created_at: null };
-  }
   const row = await apiFetch(`/admin/users/${userId}/role`, {
     method: 'PATCH',
     body: JSON.stringify({ role }),
@@ -559,57 +415,20 @@ export async function updateUserRole(
 
 
 // ---------------------------------------------------------------------------
-// Email Connectors (Phase 1-2: Gmail only). Mock mode returns static, honest
-// demo data — never a fake Gmail connection.
+// Email Connectors (Phase 1-2: Gmail only)
 // ---------------------------------------------------------------------------
 
 export async function listConnectorCapabilities(): Promise<EmailProviderRegistryEntry[]> {
-  if (USE_MOCK) {
-    return [
-      {
-        provider: 'gmail',
-        display_name: 'Gmail',
-        status: 'coming_soon',
-        capabilities: null,
-        detail: 'DEMO MODE — connector actions are simulated/unavailable',
-      },
-      {
-        provider: 'outlook',
-        display_name: 'Outlook',
-        status: 'coming_soon',
-        capabilities: null,
-        detail: 'Microsoft Graph connector arrives with the Orgs Phase',
-      },
-      {
-        provider: 'yahoo',
-        display_name: 'Yahoo Mail',
-        status: 'unsupported',
-        capabilities: null,
-        detail: 'Yahoo Mail has no third-party OAuth API',
-      },
-      {
-        provider: 'icloud',
-        display_name: 'iCloud Mail',
-        status: 'unsupported',
-        capabilities: null,
-        detail: 'iCloud Mail has no third-party OAuth API',
-      },
-    ];
-  }
   const res = await apiFetch('/connectors/capabilities');
   return res.items as EmailProviderRegistryEntry[];
 }
 
 export async function listEmailConnectors(): Promise<EmailConnectorAccount[]> {
-  if (USE_MOCK) return []; // Demo mode: no connectors, no fake Gmail account.
   const res = await apiFetch('/connectors');
   return res.items as EmailConnectorAccount[];
 }
 
 export async function authorizeGmailConnector(): Promise<string> {
-  if (USE_MOCK) {
-    throw new Error('DEMO MODE — connector actions are simulated/unavailable');
-  }
   const res = await apiFetch('/connectors/gmail/authorize', { method: 'POST', body: '{}' });
   return res.authorization_url as string;
 }
@@ -617,9 +436,6 @@ export async function authorizeGmailConnector(): Promise<string> {
 export async function testEmailConnector(
   id: string,
 ): Promise<{ ok: boolean; email_address?: string; messages_total?: number; message?: string }> {
-  if (USE_MOCK) {
-    throw new Error('DEMO MODE — connector actions are simulated/unavailable');
-  }
   return (await apiFetch(`/connectors/${id}/test`, { method: 'POST' })) as {
     ok: boolean;
     message?: string;
@@ -627,14 +443,10 @@ export async function testEmailConnector(
 }
 
 export async function disconnectEmailConnector(id: string): Promise<void> {
-  if (USE_MOCK) {
-    throw new Error('DEMO MODE — connector actions are simulated/unavailable');
-  }
   await apiFetch(`/connectors/${id}`, { method: 'DELETE' });
 }
 
 export async function listConnectorOperations(): Promise<ConnectorOperationLog[]> {
-  if (USE_MOCK) return [];
   const res = await apiFetch('/connectors/operations');
   return res.items as ConnectorOperationLog[];
 }
@@ -646,7 +458,6 @@ export async function listConnectorMessages(
   connectorId: string,
   limit = 20,
 ): Promise<MailMessageSummary[]> {
-  if (USE_MOCK) return []; // Demo mode has no real mailbox.
   return (await apiFetch(`/connectors/${connectorId}/messages?limit=${limit}`)) as MailMessageSummary[];
 }
 
@@ -654,9 +465,6 @@ export async function scanConnectorMessages(
   connectorId: string,
   body: { message_ids?: string[]; scan_recent?: number },
 ): Promise<ScanResult[]> {
-  if (USE_MOCK) {
-    throw new Error('DEMO MODE — mailbox scanning requires a real connected mailbox');
-  }
   return (await apiFetch(`/connectors/${connectorId}/scan`, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -667,9 +475,6 @@ export async function getMessageAnalysis(
   connectorId: string,
   messageId: string,
 ): Promise<MessageAnalysis> {
-  if (USE_MOCK) {
-    throw new Error('DEMO MODE — mailbox scanning requires a real connected mailbox');
-  }
   return (await apiFetch(`/connectors/${connectorId}/messages/${messageId}/analysis`)) as MessageAnalysis;
 }
 
@@ -677,15 +482,6 @@ export async function getMessageAnalysis(
 // --- Enforcement (Phase 4) — real provider-backed actions ---
 
 export async function getConnectorSettings(connectorId: string): Promise<ConnectorSettings> {
-  if (USE_MOCK) {
-    return {
-      connector_id: connectorId,
-      quarantine_expiry_hours: 24,
-      permanent_delete_enabled: false,
-      auto_quarantine_enabled: true,
-      updated_at: null,
-    };
-  }
   return (await apiFetch(`/connectors/${connectorId}/settings`)) as ConnectorSettings;
 }
 
@@ -698,9 +494,6 @@ export async function updateConnectorSettings(
     auto_quarantine_enabled?: boolean;
   },
 ): Promise<ConnectorSettings> {
-  if (USE_MOCK) {
-    return getConnectorSettings(connectorId);
-  }
   return (await apiFetch(`/connectors/${connectorId}/settings`, {
     method: 'PUT',
     body: JSON.stringify(patch),
@@ -708,19 +501,16 @@ export async function updateConnectorSettings(
 }
 
 export async function listQuarantined(): Promise<QuarantinedItem[]> {
-  if (USE_MOCK) return []; // Demo mode: no real mailbox actions exist.
   const res = await apiFetch('/enforcement/quarantine');
   return res.items as QuarantinedItem[];
 }
 
 export async function releaseQuarantined(itemId: string): Promise<string> {
-  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   const res = await apiFetch(`/enforcement/quarantine/${itemId}/release`, { method: 'POST' });
   return res.status as string;
 }
 
 export async function deleteQuarantined(itemId: string): Promise<{ status: string; message?: string }> {
-  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   return (await apiFetch(`/enforcement/quarantine/${itemId}/delete`, { method: 'POST' })) as {
     status: string;
     message?: string;
@@ -728,32 +518,27 @@ export async function deleteQuarantined(itemId: string): Promise<{ status: strin
 }
 
 export async function listBlockedSenders(): Promise<BlockedSender[]> {
-  if (USE_MOCK) return [];
   const res = await apiFetch('/enforcement/blocked-senders');
   return res.items as BlockedSender[];
 }
 
 export async function unblockSender(blockId: string): Promise<string> {
-  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   const res = await apiFetch(`/enforcement/blocked-senders/${blockId}/release`, { method: 'POST' });
   return res.status as string;
 }
 
 export async function releaseAndTrustQuarantined(itemId: string): Promise<ReleaseAndTrustResult> {
-  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   return (await apiFetch(`/enforcement/quarantine/${itemId}/release-and-trust`, {
     method: 'POST',
   })) as ReleaseAndTrustResult;
 }
 
 export async function listTrustedSenders(): Promise<TrustedSender[]> {
-  if (USE_MOCK) return [];
   const res = await apiFetch('/enforcement/trusted-senders');
   return res.items as TrustedSender[];
 }
 
 export async function trustSender(senderEmail: string, reason: string): Promise<TrustedSender> {
-  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   return (await apiFetch('/enforcement/trusted-senders', {
     method: 'POST',
     body: JSON.stringify({ sender_email: senderEmail, reason }),
@@ -761,7 +546,6 @@ export async function trustSender(senderEmail: string, reason: string): Promise<
 }
 
 export async function removeTrustedSender(senderId: string): Promise<string> {
-  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   const res = await apiFetch(`/enforcement/trusted-senders/${senderId}`, { method: 'DELETE' });
   return res.status as string;
 }
@@ -808,14 +592,6 @@ export interface IngestionActivity {
 }
 
 export async function getIngestionActivity(limit: number = 20): Promise<IngestionActivity> {
-  if (USE_MOCK) {
-    return {
-      connected_mailboxes: [],
-      recent_emails: [],
-      recent_jobs: [],
-      summary: { total_processed: 0, threats_detected: 0, quarantined: 0 },
-    };
-  }
   return (await apiFetch(`/connectors/activity?limit=${limit}`)) as IngestionActivity;
 }
 
@@ -836,7 +612,6 @@ export interface SecurityHistoryFilters {
 export async function listSecurityHistory(
   filters: SecurityHistoryFilters = {},
 ): Promise<{ items: SecurityEventRecord[]; total: number; limit: number; offset: number }> {
-  if (USE_MOCK) return { items: [], total: 0, limit: filters.limit ?? 50, offset: filters.offset ?? 0 };
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(filters)) {
     if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
@@ -850,12 +625,10 @@ export async function listSecurityHistory(
 }
 
 export async function getQuarantineReview(itemId: string): Promise<QuarantineReview> {
-  if (USE_MOCK) throw new Error('DEMO MODE — history requires a real backend');
   return (await apiFetch(`/quarantine/${itemId}/review`)) as QuarantineReview;
 }
 
 export async function keepQuarantined(itemId: string): Promise<string> {
-  if (USE_MOCK) throw new Error('DEMO MODE — enforcement actions are simulated/unavailable');
   const res = await apiFetch(`/enforcement/quarantine/${itemId}/keep`, { method: 'POST' });
   return res.status as string;
 }
@@ -863,25 +636,17 @@ export async function keepQuarantined(itemId: string): Promise<string> {
 // --- Notifications (Phase 7) ---
 
 export async function listNotificationLogs(): Promise<NotificationLogEntry[]> {
-  if (USE_MOCK) return [];
   const res = await apiFetch('/notifications');
   return res.items as NotificationLogEntry[];
 }
 
 export async function updateNotificationEmail(email: string | null): Promise<string | null> {
-  if (USE_MOCK) return email;
   const res = await apiFetch('/auth/notification-email', {
     method: 'PUT',
     body: JSON.stringify({ notification_email: email }),
   });
   return res.notification_email as string | null;
 }
-
-export function isMockMode(): boolean {
-  return USE_MOCK;
-}
-
-export { mockApi };
 
 // ---------------------------------------------------------------------------
 // Dual-Mode Enforcement — action executions, quarantine, blocklist, policies
@@ -895,7 +660,6 @@ export async function listActions(params?: {
   page?: number;
   page_size?: number;
 }): Promise<ActionListResponse> {
-  if (USE_MOCK) return mockApi.mockListActions(params);
   const query = new URLSearchParams();
   if (params?.status) query.set('status', params.status);
   if (params?.action_type) query.set('action_type', params.action_type);
@@ -907,12 +671,10 @@ export async function listActions(params?: {
 }
 
 export async function getAction(id: string): Promise<ActionExecution> {
-  if (USE_MOCK) return mockApi.mockGetAction(id);
   return apiFetch(`/actions/${id}`);
 }
 
 export async function approveAction(id: string, comment?: string): Promise<ActionExecution> {
-  if (USE_MOCK) return mockApi.mockApproveAction(id, comment);
   return apiFetch(`/actions/${id}/approve`, {
     method: 'POST',
     body: JSON.stringify({ comment: comment ?? null }),
@@ -920,7 +682,6 @@ export async function approveAction(id: string, comment?: string): Promise<Actio
 }
 
 export async function rejectAction(id: string, reason: string): Promise<ActionExecution> {
-  if (USE_MOCK) return mockApi.mockRejectAction(id, reason);
   return apiFetch(`/actions/${id}/reject`, {
     method: 'POST',
     body: JSON.stringify({ reason }),
@@ -928,7 +689,6 @@ export async function rejectAction(id: string, reason: string): Promise<ActionEx
 }
 
 export async function listQuarantine(page?: number, pageSize?: number): Promise<ActionListResponse> {
-  if (USE_MOCK) return mockApi.mockListQuarantine(page, pageSize);
   const query = new URLSearchParams();
   if (page) query.set('page', String(page));
   if (pageSize) query.set('page_size', String(pageSize));
@@ -936,12 +696,10 @@ export async function listQuarantine(page?: number, pageSize?: number): Promise<
 }
 
 export async function releaseQuarantine(id: string): Promise<ActionExecution> {
-  if (USE_MOCK) return mockApi.mockReleaseQuarantine(id);
   return apiFetch(`/actions/quarantine/${id}/release`, { method: 'POST' });
 }
 
 export async function listBlocklist(page?: number, pageSize?: number): Promise<ActionListResponse> {
-  if (USE_MOCK) return mockApi.mockListBlocklist(page, pageSize);
   const query = new URLSearchParams();
   if (page) query.set('page', String(page));
   if (pageSize) query.set('page_size', String(pageSize));
@@ -949,22 +707,18 @@ export async function listBlocklist(page?: number, pageSize?: number): Promise<A
 }
 
 export async function unblockItem(id: string): Promise<ActionExecution> {
-  if (USE_MOCK) return mockApi.mockUnblockItem(id);
   return apiFetch(`/actions/blocklist/${id}/unblock`, { method: 'POST' });
 }
 
 export async function listPolicies(): Promise<PolicyListResponse> {
-  if (USE_MOCK) return mockApi.mockListPolicies();
   return apiFetch('/policies');
 }
 
 export async function getPolicy(id: string): Promise<EnforcementPolicy> {
-  if (USE_MOCK) return mockApi.mockGetPolicy(id);
   return apiFetch(`/policies/${id}`);
 }
 
 export async function updatePolicy(id: string, updates: PolicyUpdatePayload): Promise<EnforcementPolicy> {
-  if (USE_MOCK) return mockApi.mockUpdatePolicy(id, updates);
   return apiFetch(`/policies/${id}`, {
     method: 'PUT',
     body: JSON.stringify(updates),
@@ -972,7 +726,6 @@ export async function updatePolicy(id: string, updates: PolicyUpdatePayload): Pr
 }
 
 export async function activatePolicy(id: string): Promise<EnforcementPolicy> {
-  if (USE_MOCK) return mockApi.mockActivatePolicy(id);
   return apiFetch(`/policies/${id}/activate`, { method: 'POST' });
 }
 
@@ -981,13 +734,6 @@ export async function activatePolicy(id: string): Promise<EnforcementPolicy> {
 // ---------------------------------------------------------------------------
 
 export async function getDlqStats(): Promise<import('../types').DlqStats> {
-  if (USE_MOCK) {
-    return {
-      total_dead_letter: 3,
-      by_job_type: { gmail_sync: 2, email_fetch: 1, email_analysis: 0 },
-      oldest_age_hours: 4.5,
-    };
-  }
   return apiFetch('/dlq/stats');
 }
 
@@ -999,60 +745,6 @@ export async function getDlqJobs(params?: {
   limit?: number;
   offset?: number;
 }): Promise<import('../types').DlqJobsResponse> {
-  if (USE_MOCK) {
-    const mockJobs = [
-      {
-        job_id: 'job-dlq-001',
-        job_type: 'gmail_sync',
-        owner_user_id: 'usr_admin',
-        payload: { user_id: 'usr_admin', account_id: 'acc_123', correlation_id: 'corr-001' },
-        error: 'GmailAuthError: 401 Unauthorized - user revoked OAuth token',
-        retry_count: 0,
-        created_at: new Date(Date.now() - 4.5 * 3600 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 4.5 * 3600 * 1000).toISOString(),
-        retry_history: [
-          { attempt: 1, error: 'GmailAuthError: 401 Unauthorized', timestamp: new Date(Date.now() - 4.5 * 3600 * 1000).toISOString() }
-        ]
-      },
-      {
-        job_id: 'job-dlq-002',
-        job_type: 'email_fetch',
-        owner_user_id: 'usr_analyst',
-        payload: { user_id: 'usr_analyst', message_id: 'msg_456', correlation_id: 'corr-002' },
-        error: 'MIMECorruptionError: Corrupt boundary delimiters in RFC 2822 payload',
-        retry_count: 0,
-        created_at: new Date(Date.now() - 2.1 * 3600 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 2.1 * 3600 * 1000).toISOString(),
-        retry_history: [
-          { attempt: 1, error: 'MIMECorruptionError: Corrupt boundary delimiters', timestamp: new Date(Date.now() - 2.1 * 3600 * 1000).toISOString() }
-        ]
-      },
-      {
-        job_id: 'job-dlq-003',
-        job_type: 'gmail_sync',
-        owner_user_id: 'usr_admin',
-        payload: { user_id: 'usr_admin', account_id: 'acc_789', correlation_id: 'corr-003' },
-        error: 'GmailRateLimitError: 429 Too Many Requests - quota exceeded',
-        retry_count: 5,
-        created_at: new Date(Date.now() - 1.2 * 3600 * 1000).toISOString(),
-        updated_at: new Date(Date.now() - 0.2 * 3600 * 1000).toISOString(),
-        retry_history: [
-          { attempt: 1, error: 'GmailRateLimitError 429', timestamp: new Date(Date.now() - 1.2 * 3600 * 1000).toISOString() },
-          { attempt: 5, error: 'GmailRateLimitError 429: max retries exceeded', timestamp: new Date(Date.now() - 0.2 * 3600 * 1000).toISOString() }
-        ]
-      }
-    ];
-    let filtered = mockJobs;
-    if (params?.job_type) {
-      filtered = filtered.filter(j => j.job_type === params.job_type);
-    }
-    return {
-      jobs: filtered,
-      total: filtered.length,
-      limit: params?.limit ?? 50,
-      offset: params?.offset ?? 0
-    };
-  }
   const query = new URLSearchParams();
   if (params?.job_type) query.set('job_type', params.job_type);
   if (params?.from_date) query.set('from_date', params.from_date);
@@ -1065,25 +757,13 @@ export async function getDlqJobs(params?: {
 }
 
 export async function getDlqJob(jobId: string): Promise<import('../types').DlqJob> {
-  if (USE_MOCK) {
-    const list = await getDlqJobs();
-    const found = list.jobs.find(j => j.job_id === jobId);
-    if (found) return found;
-    throw new Error('Job not found in mock DLQ');
-  }
   return apiFetch(`/dlq/jobs/${jobId}`);
 }
 
 export async function retryDlqJob(jobId: string): Promise<{ success: boolean; message: string }> {
-  if (USE_MOCK) {
-    return { success: true, message: `Job ${jobId} reset to queued and re-enqueued` };
-  }
   return apiFetch(`/dlq/jobs/${jobId}/retry`, { method: 'POST' });
 }
 
 export async function deleteDlqJob(jobId: string): Promise<{ success: boolean; message: string }> {
-  if (USE_MOCK) {
-    return { success: true, message: `Job ${jobId} soft-deleted` };
-  }
   return apiFetch(`/dlq/jobs/${jobId}`, { method: 'DELETE' });
 }

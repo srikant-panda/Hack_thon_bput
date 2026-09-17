@@ -227,16 +227,6 @@ async def process_gmail_sync(
             start_history_id=account.last_history_id,
             refresh_token=refresh_token,
         )
-    except GmailClientError as exc:
-        if getattr(exc, "status_code", None) == 404:
-            logger.info("History ID %s expired (404); recovering via profile and recent messages", account.last_history_id)
-            profile = await gmail.get_profile(access_token=access_token or "", refresh_token=refresh_token)
-            account.last_history_id = str(profile.get("historyId") or history_id_from_pubsub or "")
-            await db.commit()
-            recent_msgs = await gmail.list_messages(access_token=access_token or "", q="in:inbox", max_results=5, refresh_token=refresh_token)
-            history_response = [{"messagesAdded": [{"message": {"id": m["id"]}}]} for m in recent_msgs if isinstance(m, dict) and "id" in m]
-        else:
-            raise
     except GmailAuthError:
         account.sync_status = "error"
         account.last_error = "reauth_required"
@@ -259,6 +249,16 @@ async def process_gmail_sync(
         gmail_sync_jobs_total.labels(status="failed").inc()
         gmail_api_errors_total.labels(error_type="server").inc()
         raise
+    except GmailClientError as exc:
+        if getattr(exc, "status_code", None) == 404:
+            logger.info("History ID %s expired (404); recovering via profile and recent messages", account.last_history_id)
+            profile = await gmail.get_profile(access_token=access_token or "", refresh_token=refresh_token)
+            account.last_history_id = str(profile.get("historyId") or history_id_from_pubsub or "")
+            await db.commit()
+            recent_msgs = await gmail.list_messages(access_token=access_token or "", q="in:inbox", max_results=5, refresh_token=refresh_token)
+            history_response = [{"messagesAdded": [{"message": {"id": m["id"]}}]} for m in recent_msgs if isinstance(m, dict) and "id" in m]
+        else:
+            raise
     except Exception:
         duration = time.perf_counter() - start_time
         job_processing_duration_seconds.labels(job_type="gmail_sync").observe(duration)

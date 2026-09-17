@@ -45,7 +45,7 @@ export default function ExplanationPanel({ explanation, confidence }: Props) {
       <div className="flex items-center gap-2">
         <BrainCircuit className="h-4.5 w-4.5 text-red-400" style={{ width: 18, height: 18 }} />
         <h3 className="text-sm font-semibold text-zinc-100">AI Explanation</h3>
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-zinc-500">Simulated XAI output</span>
+        <span className="ml-auto text-[10px] uppercase tracking-wider text-zinc-500">XAI explanation</span>
       </div>
       <p className="mt-3 text-[13px] leading-relaxed text-zinc-300">{highlight(explanation)}</p>
       <div className="mt-4">

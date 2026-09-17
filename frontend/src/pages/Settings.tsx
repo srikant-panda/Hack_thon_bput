@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import PageHeader from '../components/common/PageHeader';
 import * as api from '../services/api';
 import { SEVERITY_COLORS } from '../theme';
-import { getSeverityFromScore } from '../services/mockEngine';
+import { getSeverityFromScore } from '../services/severity';
 
 const BANDS: [number, number, string][] = [
   [0, 20, 'Benign activity; no action required. Monitor-only logging.'],
@@ -16,7 +16,6 @@ const BANDS: [number, number, string][] = [
 
 export default function Settings() {
   const user = useAuthStore((s) => s.user);
-  const [mockMode] = useState(true);
   const notificationEmail = useAuthStore((s) => s.notificationEmail);
   const setNotificationEmailState = useAuthStore((s) => s.fetchUserContext);
   const [notifEmail, setNotifEmail] = useState(notificationEmail ?? '');
@@ -107,20 +106,19 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Mock mode */}
+      {/* Backend connection */}
       <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/60 p-5 backdrop-blur">
         <div className="mb-4 flex items-center gap-2">
           <Shield className="h-4 w-4 text-red-400" />
-          <h3 className="text-sm font-semibold text-zinc-100">Mock Mode</h3>
+          <h3 className="text-sm font-semibold text-zinc-100">Backend Connection</h3>
         </div>
-        <label className="flex items-center justify-between gap-4">
+        <div className="mb-4 flex items-center justify-between gap-4">
           <div>
-            <div className="text-sm text-zinc-200">Use mock API backend</div>
-            <p className="mt-0.5 text-xs text-zinc-500">Backend integration not yet configured</p>
+            <div className="text-sm text-zinc-200">Live backend connected</div>
+            <p className="mt-0.5 text-xs text-zinc-500">Supabase Auth + FastAPI at the URL below</p>
           </div>
-          <input type="checkbox" checked={mockMode} disabled className="h-5 w-5 accent-red-500" />
-        </label>
-        <div className="mt-4">
+        </div>
+        <div>
           <div className="mb-1.5 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
             <Server className="h-3 w-3" /> Backend URL
           </div>
@@ -130,7 +128,7 @@ export default function Settings() {
             className="w-full rounded-lg border border-zinc-700/60 bg-zinc-900/80 px-3 py-2 font-mono text-sm text-zinc-400"
           />
           <p className="mt-1.5 flex items-center gap-1 text-[11px] text-zinc-600">
-            <Lock className="h-3 w-3" /> Will be activated in backend phase — set VITE_USE_MOCK=false to switch
+            <Lock className="h-3 w-3" /> All data is served by the live backend
           </p>
         </div>
       </div>
@@ -189,16 +187,16 @@ export default function Settings() {
         </div>
         <div className="space-y-1.5 text-xs text-zinc-400">
           <p>
-            <span className="text-zinc-200">Version:</span> 1.0.0 (frontend prototype, mock mode)
+            <span className="text-zinc-200">Version:</span> 1.0.0
           </p>
           <p>
             <span className="text-zinc-200">Tech stack:</span> Vite, React 18, TypeScript (strict), Tailwind CSS, react-router-dom v6, Recharts, lucide-react, Zustand
           </p>
           <p>
-            <span className="text-zinc-200">Detection:</span> All threat analysis runs in a local heuristic engine (mockEngine.ts). Results are deterministic simulations and not trained-model verdicts.
+            <span className="text-zinc-200">Detection:</span> All threat analysis runs on the live backend (heuristic + ML blend with XAI explanations).
           </p>
           <p>
-            <span className="text-zinc-200">Data:</span> All alerts, incidents and logs are simulated. No real threat intelligence or personal data is used.
+            <span className="text-zinc-200">Data:</span> All alerts, incidents and logs come from the connected backend. No simulated data is used.
           </p>
         </div>
       </div>

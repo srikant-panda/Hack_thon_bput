@@ -61,7 +61,6 @@ function formatWhen(iso: string | null): string {
 }
 
 export default function EmailConnectors() {
-  const isMockMode = api.isMockMode();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [registry, setRegistry] = useState<EmailProviderRegistryEntry[]>([]);
@@ -282,14 +281,6 @@ export default function EmailConnectors() {
         </div>
       )}
 
-      {/* Mock-mode honesty badge */}
-      {isMockMode && (
-        <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
-          <AlertTriangle className="h-4 w-4 text-amber-400" />
-          <span className="font-mono font-bold tracking-wider">DEMO MODE — connector actions are simulated/unavailable</span>
-        </div>
-      )}
-
       {actionError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">
           <AlertTriangle className="h-4 w-4 text-red-400" />
@@ -327,7 +318,7 @@ export default function EmailConnectors() {
                 <button
                   type="button"
                   onClick={handleConnectGmail}
-                  disabled={authorizing || !gmailEnabled || isMockMode}
+                  disabled={authorizing || !gmailEnabled}
                   className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-red-600 py-2 text-xs font-bold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
                   title={gmailEnabled ? 'Connect your Gmail mailbox' : entry!.detail || 'Gmail connector is not configured yet'}
                 >
@@ -416,7 +407,7 @@ export default function EmailConnectors() {
                   <button
                     type="button"
                     onClick={() => handleTest(connector)}
-                    disabled={testingId === connector.id || isMockMode}
+                    disabled={testingId === connector.id}
                     className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-800/60 disabled:opacity-50"
                   >
                     {testingId === connector.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
@@ -425,7 +416,7 @@ export default function EmailConnectors() {
                   <button
                     type="button"
                     onClick={() => handleDisconnect(connector)}
-                    disabled={disconnectingId === connector.id || isMockMode}
+                    disabled={disconnectingId === connector.id}
                     className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-50"
                   >
                     {disconnectingId === connector.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unplug className="h-3.5 w-3.5" />}

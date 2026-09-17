@@ -42,7 +42,6 @@ function detectLogKind(parsed: unknown): LogKind {
  * the existing ATO / network detectors — analysis only, real results.
  */
 export default function LogAnalysis() {
-  const isMockMode = api.isMockMode();
   const addToast = useUiStore((s) => s.addToast);
   const [pasted, setPasted] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
@@ -102,13 +101,6 @@ export default function LogAnalysis() {
         title="Log Analysis"
         description="Paste an authentication log or network-flow JSON array — CYBERGUARD detects the format and runs the matching detection engine. Analysis only; nothing is executed."
       />
-
-      {isMockMode && (
-        <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
-          <AlertTriangle className="h-4 w-4 text-amber-400" />
-          <span className="font-mono font-bold tracking-wider">DEMO MODE — analysis runs on the local mock engine</span>
-        </div>
-      )}
 
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5 shadow-sm backdrop-blur">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

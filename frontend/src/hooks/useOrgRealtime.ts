@@ -6,7 +6,7 @@ import { getSupabase } from '../lib/supabaseClient';
  * table (migration 0009 publishes cyberguard.org_log_events + cyberguard.alerts).
  *
  * Calls ``onChange`` whenever an INSERT/UPDATE/DELETE for the organization
- * arrives. When Supabase is not configured (mock mode / local demo without
+ * arrives. When Supabase is not configured (local dev without
  * keys) this is a silent no-op and the caller should fall back to re-fetching
  * on an interval.
  */

@@ -16,7 +16,6 @@ function formatWhen(iso: string | null): string {
 }
 
 export default function NotificationLog() {
-  const isMockMode = api.isMockMode();
   const [logs, setLogs] = useState<NotificationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,13 +42,6 @@ export default function NotificationLog() {
         title="Notification Log"
         description="Every event email CYBERGUARD rendered and delivered to your registered notification address. Connected mailboxes are never used for system notifications."
       />
-
-      {isMockMode && (
-        <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
-          <AlertTriangle className="h-4 w-4 text-amber-400" />
-          <span className="font-mono font-bold tracking-wider">DEMO MODE — notifications require a real backend</span>
-        </div>
-      )}
 
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">

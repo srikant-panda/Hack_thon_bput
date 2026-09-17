@@ -186,8 +186,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_USE_MOCK: "false"
-        VITE_API_BASE_URL: http://localhost:8000/api/v1
+        VITE_API_BASE_URL: /api/v1
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-https://YOUR-PROJECT.supabase.co}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-your-anon-key}
     container_name: cyberguard-frontend-prod

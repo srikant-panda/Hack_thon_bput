@@ -67,7 +67,7 @@ export default function RecommendedActionsPanel({ actions, onExecute }: Props) {
             {isExecuted ? (
               <div className="mt-2.5 flex items-center gap-1.5 text-xs font-medium text-zinc-200">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Executed (simulated){action.executedAt ? ` at ${new Date(action.executedAt).toLocaleTimeString()}` : ''}
+                Acknowledged{action.executedAt ? ` at ${new Date(action.executedAt).toLocaleTimeString()}` : ''}
               </div>
             ) : (
               <div className="mt-2.5 flex items-center gap-3">
@@ -89,7 +89,7 @@ export default function RecommendedActionsPanel({ actions, onExecute }: Props) {
                   className="flex items-center gap-1.5 rounded-lg bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-300 ring-1 ring-red-500/40 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <ShieldCheck className="h-3.5 w-3.5" />
-                  Apply (Simulated)
+                  Acknowledge
                 </button>
               </div>
             )}

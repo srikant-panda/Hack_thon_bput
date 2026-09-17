@@ -40,7 +40,6 @@ function formatWhen(iso: string | null): string {
 }
 
 export default function SecurityHistory() {
-  const isMockMode = api.isMockMode();
   const [items, setItems] = useState<SecurityEventRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -90,13 +89,6 @@ export default function SecurityHistory() {
         title="Security History"
         description="Permanent record of real security events and provider operations — scan verdicts, quarantines, sender-rule lifecycle, and manual reviews."
       />
-
-      {isMockMode && (
-        <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
-          <AlertTriangle className="h-4 w-4 text-amber-400" />
-          <span className="font-mono font-bold tracking-wider">DEMO MODE — history requires a real backend</span>
-        </div>
-      )}
 
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">

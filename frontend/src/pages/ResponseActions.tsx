@@ -77,7 +77,7 @@ export default function ResponseActions() {
     setExecuting(true);
     try {
       const execution = await api.executeResponse(selectedAction, target.trim(), approved || !selected?.requiresApproval);
-      addToast(`Executed (simulated): ${execution.actionName} on ${execution.target}`, 'safe');
+      addToast(`Executed: ${execution.actionName} on ${execution.target}`, 'safe');
       setTarget('');
       setApproved(false);
       setSelectedAction('');
@@ -93,7 +93,7 @@ export default function ResponseActions() {
     <div className="space-y-5">
       <PageHeader
         title="Response Actions"
-        description="Simulated response playbook execution. Destructive actions require explicit human approval and every execution is recorded in the audit log."
+        description="Response playbook execution through the backend response engine. Destructive actions require explicit human approval and every execution is recorded in the audit log."
       />
       {readOnly && (
         <div className="rounded-lg border border-red-400/40 bg-red-400/10 px-3.5 py-2 text-xs text-red-400">
@@ -117,7 +117,7 @@ export default function ResponseActions() {
         <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/60 p-5 backdrop-blur">
           <div className="mb-4 flex items-center gap-2">
             <Zap className="h-4 w-4 text-red-400" />
-            <h3 className="text-sm font-semibold text-zinc-100">Execute Action (Simulated)</h3>
+            <h3 className="text-sm font-semibold text-zinc-100">Execute Action</h3>
           </div>
           <div className="space-y-3.5">
             <div>
@@ -169,10 +169,10 @@ export default function ResponseActions() {
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {executing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-              {executing ? 'Executing...' : 'Execute (Simulated)'}
+              {executing ? 'Executing...' : 'Execute'}
             </button>
             <p className="text-center text-[11px] text-zinc-600">
-              No real infrastructure is modified. All executions are simulated and audit-logged.
+              Executions run through the backend response engine and are recorded in the audit log.
             </p>
           </div>
         </div>

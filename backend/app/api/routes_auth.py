@@ -56,6 +56,12 @@ class NotificationEmailUpdate(BaseModel):
     notification_email: Optional[str] = Field(default=None, max_length=255)
 
 
+@router.get("/config")
+async def auth_config() -> dict[str, Any]:
+    """Public bootstrap config for pre-auth pages (no token required)."""
+    return {"org_enabled": get_settings().ORG_ENABLED}
+
+
 @router.get("/username-available")
 async def username_available(username: str) -> dict[str, Any]:
     """Check username availability (validated against the signup pattern)."""

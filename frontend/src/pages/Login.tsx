@@ -2,13 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, AtSign, Building2, CheckCircle2, Clock, Loader2, Lock, Mail, Shield, User } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { isMockMode } from '../services/api';
 
 type Mode = 'signin' | 'signup' | 'forgot';
 type AccountType = 'user' | 'organization';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
 const USERNAME_PATTERN = /^[a-z0-9_.]{3,32}$/;
 
 export default function Login() {
@@ -23,8 +21,8 @@ export default function Login() {
   const initialMode: Mode =
     modeParam === 'signup' || modeParam === 'forgot' ? modeParam : 'signin';
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [email, setEmail] = useState('admin@cyberguard.local');
-  const [password, setPassword] = useState('demo1234');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [accountType, setAccountType] = useState<AccountType>('user');
@@ -33,10 +31,21 @@ export default function Login() {
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [orgMessage, setOrgMessage] = useState<string | null>(null);
+  // Whether the backend runs with organization mode on (ORG_ENABLED),
+  // learned from the public /auth/config endpoint.
+  const [orgMode, setOrgMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<'google' | 'github' | null>(null);
+
+  // Public bootstrap config: organization mode flag (no token required).
+  useEffect(() => {
+    fetch(`${BASE_URL}/auth/config`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setOrgMode(Boolean(data?.org_enabled)))
+      .catch(() => setOrgMode(false));
+  }, []);
 
   // Live username availability check (debounced, real backend only).
   useEffect(() => {
@@ -47,10 +56,6 @@ export default function Login() {
     }
     if (!USERNAME_PATTERN.test(username)) {
       setUsernameStatus('invalid');
-      return;
-    }
-    if (USE_MOCK) {
-      setUsernameStatus('available');
       return;
     }
     setUsernameStatus('checking');
@@ -78,10 +83,10 @@ export default function Login() {
     setOrgMessage(null);
   };
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (emailOverride?: string) => {
     setLoading(true);
     try {
-      await login(email, password);
+      await login(emailOverride || email, password);
       navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -92,6 +97,7 @@ export default function Login() {
 
   const handleSignUp = async () => {
     if (accountType === 'organization') {
+      if (orgMode) return handleOrgSignUp();
       setOrgMessage('Organization accounts are coming soon.');
       return;
     }
@@ -129,6 +135,65 @@ export default function Login() {
     }
   };
 
+  // ORG-1 org signup: register the admin user, then the Create Organization
+  // page (opened with the chosen name prefilled) makes the org and reveals
+  // its API key. The username is derived from the work email because the
+  // backend requires a unique one per account.
+  const deriveOrgUsername = async (rawEmail: string): Promise<string> => {
+    const base =
+      (rawEmail.split('@')[0] || 'org')
+        .toLowerCase()
+        .replace(/[^a-z0-9_.]/g, '.')
+        .replace(/\.{2,}/g, '.')
+        .replace(/^\.+|\.+$/g, '')
+        .slice(0, 28) || 'org';
+    const candidate = base.length >= 3 ? base : `${base}.org`;
+    for (const suffix of ['', '2', '3', '4']) {
+      const candidate2 = `${candidate}${suffix}`;
+      try {
+        const res = await fetch(
+          `${BASE_URL}/auth/username-available?username=${encodeURIComponent(candidate2)}`
+        );
+        if (res.ok && (await res.json()).available) return candidate2;
+      } catch {
+        return candidate2;
+      }
+    }
+    return `${candidate}.${Math.random().toString(16).slice(2, 6)}`;
+  };
+
+  const handleOrgSignUp = async () => {
+    if (!orgName.trim()) {
+      setOrgMessage('Enter an organization name.');
+      return;
+    }
+    if (!orgEmail.trim()) {
+      setOrgMessage('Enter your work email.');
+      return;
+    }
+    if (password.length < 8) {
+      setOrgMessage('Password must be at least 8 characters long.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const derivedUsername = await deriveOrgUsername(orgEmail.trim());
+      const { confirmationPending } = await signUp(orgName.trim(), orgEmail.trim(), password, derivedUsername);
+      if (confirmationPending) {
+        resetMessages();
+        setNotice(
+          'Verification email sent! Confirm your email and sign in — then finish setting up your organization.'
+        );
+      } else {
+        navigate('/org/create', { state: { name: orgName.trim() }, replace: true });
+      }
+    } catch (err) {
+      setOrgMessage(err instanceof Error ? err.message : 'Registration failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleForgot = async () => {
     if (!email) {
       setError('Please enter your email address');
@@ -150,6 +215,8 @@ export default function Login() {
     e.preventDefault();
     resetMessages();
     if (accountType === 'organization') {
+      if (mode === 'signin') return handleSignIn(orgEmail.trim() || undefined);
+      if (orgMode) return handleOrgSignUp();
       setOrgMessage('Organization accounts are coming soon.');
       return;
     }
@@ -233,17 +300,12 @@ export default function Login() {
           </div>
 
           {/* Mode status badge */}
-          {isMockMode() ? (
-            <div className="mb-5 flex items-center justify-between rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3 py-2 text-xs">
-              <span className="font-mono text-[11px] font-bold text-zinc-300">DEMO & EVAL MODE ACTIVE</span>
-              <span className="text-[10px] text-zinc-400">Instant test accounts</span>
-            </div>
-          ) : (
+          
             <div className="mb-5 flex items-center justify-between rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs">
               <span className="font-mono text-[11px] font-bold text-red-400">ENTERPRISE SOC MODE</span>
               <span className="text-[10px] text-zinc-400">Supabase Auth Connected</span>
             </div>
-          )}
+          
 
           {/* Account type selector (frozen organization accounts) */}
           {mode !== 'forgot' && (
@@ -272,9 +334,11 @@ export default function Login() {
                 }`}
               >
                 <Building2 className="h-3.5 w-3.5" /> Organization
-                <span className="ml-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-zinc-400 ring-1 ring-zinc-700">
-                  Coming soon
-                </span>
+                {!orgMode && (
+                  <span className="ml-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-zinc-400 ring-1 ring-zinc-700">
+                    Coming soon
+                  </span>
+                )}
               </button>
             </div>
           )}
@@ -292,28 +356,37 @@ export default function Login() {
                     Organization accounts
                   </p>
                   <p className="mt-0.5 text-[11px] text-zinc-400">
-                    Multi-analyzer workspaces with team roles are on the roadmap. Create a user
-                    account today — your data carries over when organizations launch.
+                    {orgMode
+                      ? mode === 'signin'
+                        ? 'Sign in with your work email to reach your organization workspace.'
+                        : 'Register an admin account for your team — you will create the workspace with role-based access (admin, analyst, viewer) right after.'
+                      : 'Multi-analyzer workspaces with team roles are on the roadmap. Create a user account today — your data carries over when organizations launch.'}
                   </p>
                 </div>
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  Organization Name
-                </label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
-                  <input
-                    type="text"
-                    disabled
-                    value={orgName}
-                    onChange={(e) => setOrgName(e.target.value)}
-                    className="w-full cursor-not-allowed rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-500 placeholder-zinc-600 outline-none"
-                    placeholder="Acme Security Team"
-                  />
+              {mode === 'signup' && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500">
+                    Organization Name
+                  </label>
+                  <div className="relative">
+                    <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
+                    <input
+                      type="text"
+                      disabled={!orgMode}
+                      value={orgName}
+                      onChange={(e) => setOrgName(e.target.value)}
+                      className={`w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm outline-none placeholder-zinc-600 ${
+                        orgMode
+                          ? 'text-zinc-100 focus:border-red-500/60 focus:ring-1 focus:ring-red-500/40'
+                          : 'cursor-not-allowed text-zinc-500'
+                      }`}
+                      placeholder="Acme Security Team"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500">
@@ -323,10 +396,14 @@ export default function Login() {
                   <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
                   <input
                     type="email"
-                    disabled
+                    disabled={!orgMode}
                     value={orgEmail}
                     onChange={(e) => setOrgEmail(e.target.value)}
-                    className="w-full cursor-not-allowed rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-500 placeholder-zinc-600 outline-none"
+                    className={`w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm outline-none placeholder-zinc-600 ${
+                      orgMode
+                        ? 'text-zinc-100 focus:border-red-500/60 focus:ring-1 focus:ring-red-500/40'
+                        : 'cursor-not-allowed text-zinc-500'
+                    }`}
                     placeholder="soc@acme.com"
                   />
                 </div>
@@ -340,8 +417,14 @@ export default function Login() {
                   <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
                   <input
                     type="password"
-                    disabled
-                    className="w-full cursor-not-allowed rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-500 placeholder-zinc-600 outline-none"
+                    disabled={!orgMode}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={`w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm outline-none placeholder-zinc-600 ${
+                      orgMode
+                        ? 'text-zinc-100 focus:border-red-500/60 focus:ring-1 focus:ring-red-500/40'
+                        : 'cursor-not-allowed text-zinc-500'
+                    }`}
                     placeholder="••••••••"
                   />
                 </div>
@@ -353,11 +436,36 @@ export default function Login() {
                 </div>
               )}
 
+              {error && (
+                <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-400">
+                  {error}
+                </div>
+              )}
+
+              {notice && (
+                <div className="flex items-start gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-300">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-400" />
+                  <span>{notice}</span>
+                </div>
+              )}
+
               <button
                 type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-zinc-700 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-600"
+                disabled={loading}
+                className={`flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-bold text-white transition disabled:opacity-60 ${
+                  orgMode ? 'bg-red-600 shadow-lg shadow-red-600/20 hover:bg-red-500' : 'bg-zinc-700 hover:bg-zinc-600'
+                }`}
               >
-                Join Waitlist
+                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                {orgMode
+                  ? loading
+                    ? mode === 'signin'
+                      ? 'Signing in...'
+                      : 'Creating account...'
+                    : mode === 'signin'
+                      ? 'Sign In to Workspace'
+                      : 'Create Organization Account'
+                  : 'Join Waitlist'}
               </button>
             </form>
           ) : (
@@ -498,7 +606,7 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-950 py-2.5 pl-10 pr-3 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-red-500/60 focus:ring-1 focus:ring-red-500/40"
-                  placeholder={mode === 'signin' ? 'you@company.com or alex.mercer' : 'analyst@cyberguard.local'}
+                  placeholder={mode === 'signin' ? 'you@company.com or alex.mercer' : 'analyst@yourcompany.com'}
                 />
               </div>
             </div>
@@ -574,23 +682,6 @@ export default function Login() {
               {loading ? 'Processing...' : submitLabel}
             </button>
           </form>
-
-          {mode === 'signin' && (
-            <div
-              onClick={() => {
-                setEmail('admin@cyberguard.local');
-                setPassword('demo1234');
-                resetMessages();
-              }}
-              className="mt-5 cursor-pointer rounded-lg border border-zinc-800 bg-zinc-950/60 px-3.5 py-2.5 text-center transition hover:border-red-500/40 hover:bg-zinc-900/50"
-              title="Click to auto-fill demo credentials"
-            >
-              <p className="font-mono text-[11px] text-zinc-400">
-                Demo Credentials (click to fill): <span className="text-red-400 font-semibold">admin@cyberguard.local</span> /{' '}
-                <span className="text-red-400 font-semibold">demo1234</span>
-              </p>
-            </div>
-          )}
           </>
           )}
 

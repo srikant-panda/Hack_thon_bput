@@ -175,7 +175,17 @@ class Settings(BaseSettings):
 
     APP_TITLE: str = "CYBERGUARD API"
     APP_VERSION: str = "0.2.0"
-
+    @model_validator(mode="after")
+    def _validadte_and_set_API_KEYS(self) -> Self:
+        """Enforce the api keys to null for faster testing and reduce"""
+        if self.TEST_MODE:
+            self.OPENROUTER_API_KEY = ""
+            self.OPENROUTER_API_KEYS = ""
+            self.GROQ_API_KEY = ""
+            self.GROQ_API_KEYS = ""
+            self.GEMINI_API_KEY = ""
+            self.GEMINI_API_KEYS = ""
+        return self
     @property
     def async_database_url(self) -> str:
         """Ensure standard postgresql:// URLs are translated to asyncpg."""

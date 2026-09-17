@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Building2, Info, Loader2 } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader';
 import { useUiStore } from '../store/uiStore';
@@ -13,9 +13,13 @@ import * as orgApi from '../services/orgApi';
  */
 export default function OrganizationCreate() {
   const navigate = useNavigate();
+  const location = useLocation();
   const addToast = useUiStore((s) => s.addToast);
 
-  const [name, setName] = useState('');
+  // Org signup on the Login page forwards the chosen name via router state.
+  const [name, setName] = useState<string>(
+    () => (location.state as { name?: string } | null)?.name ?? ''
+  );
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<orgApi.OrgCreated | null>(null);
 

@@ -140,6 +140,13 @@ async def base_shutdown(ctx: dict[str, Any]) -> None:
     logger = ctx.get("logger") or get_worker_logger("cyberguard.worker")
     log_worker_event(logger, logging.INFO, "Worker process shutting down gracefully", job_type="lifecycle")
 
+    db_maker = ctx.get("db_maker")
+    if db_maker and hasattr(db_maker, "kw") and "bind" in db_maker.kw:
+        try:
+            await db_maker.kw["bind"].dispose()
+        except Exception:
+            pass
+
 
 class WorkerSettings:
     """Base WorkerSettings for CYBERGUARD Arq background workers."""

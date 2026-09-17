@@ -3,7 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { Building2, Check, ChevronDown, LogOut, Radio, Shield, User, Users } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
-import { isMockMode } from '../../services/api';
 
 const ROUTE_TITLES: [RegExp, string][] = [
   [/^\/dashboard/, 'Security Operations Center'],
@@ -154,16 +153,10 @@ export default function Topbar() {
           )}
         </div>
 
-        {/* MOCK MODE badge if in mock mode */}
-        {isMockMode() ? (
-          <span className="rounded-md bg-zinc-800 px-2.5 py-1 font-mono text-[11px] font-bold tracking-wider text-zinc-300 ring-1 ring-zinc-700">
-            MOCK MODE
-          </span>
-        ) : (
-          <span className="rounded-md bg-red-500/15 px-2.5 py-1 font-mono text-[11px] font-bold tracking-wider text-red-400 ring-1 ring-red-500/40">
-            CLOUD SOC
-          </span>
-        )}
+        {/* Live backend badge */}
+        <span className="rounded-md bg-red-500/15 px-2.5 py-1 font-mono text-[11px] font-bold tracking-wider text-red-400 ring-1 ring-red-500/40">
+          CLOUD SOC
+        </span>
 
         {/* Live alerts toggle */}
         <button

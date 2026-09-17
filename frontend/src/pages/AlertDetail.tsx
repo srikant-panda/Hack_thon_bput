@@ -199,7 +199,7 @@ export default function AlertDetail() {
             actions={alert.recommendedActions}
             onExecute={(actionId) => {
               const action = alert.recommendedActions.find((a: RecommendedAction) => a.id === actionId);
-              addToast(`Response executed (simulated): ${action?.action ?? actionId}`, 'safe');
+              addToast(`Action acknowledged: ${action?.action ?? actionId}`, 'safe');
             }}
           />
         )}

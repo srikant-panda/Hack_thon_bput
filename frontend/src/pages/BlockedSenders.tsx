@@ -17,7 +17,6 @@ function formatWhen(iso: string | null): string {
 }
 
 export default function BlockedSenders() {
-  const isMockMode = api.isMockMode();
   const [blocks, setBlocks] = useState<BlockedSender[]>([]);
   const [trustedSenders, setTrustedSenders] = useState<TrustedSender[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,13 +101,6 @@ export default function BlockedSenders() {
         description="Senders auto-blocked via Gmail filters after high or critical verdicts. Temporary blocks expire automatically and their filters are removed by the scheduler. Trusting a sender makes future enforcement recommend-only — it never removes the active filter; use Unblock for that."
       />
 
-      {isMockMode && (
-        <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
-          <AlertTriangle className="h-4 w-4 text-amber-400" />
-          <span className="font-mono font-bold tracking-wider">DEMO MODE — enforcement actions are simulated/unavailable</span>
-        </div>
-      )}
-
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">
           <AlertTriangle className="h-4 w-4 text-red-400" />
@@ -178,7 +170,7 @@ export default function BlockedSenders() {
                       <button
                         type="button"
                         onClick={() => handleTrust(block)}
-                        disabled={actionId === block.id || isMockMode}
+                        disabled={actionId === block.id}
                         className="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 disabled:opacity-50"
                       >
                         {actionId === block.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
@@ -187,7 +179,7 @@ export default function BlockedSenders() {
                       <button
                         type="button"
                         onClick={() => handleUnblock(block)}
-                        disabled={actionId === block.id || isMockMode}
+                        disabled={actionId === block.id}
                         className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-50"
                       >
                         {actionId === block.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldOff className="h-3.5 w-3.5" />}
@@ -237,7 +229,7 @@ export default function BlockedSenders() {
                 <button
                   type="button"
                   onClick={() => handleUntrust(sender.id, sender.sender_email)}
-                  disabled={actionId === sender.id || isMockMode}
+                  disabled={actionId === sender.id}
                   className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-50"
                 >
                   {actionId === sender.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}

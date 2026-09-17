@@ -31,6 +31,7 @@ from app.db.session import async_session_maker  # noqa: E402
 from functools import partial  # noqa: E402
 
 from _rls import as_user, create_user_admin  # noqa: E402
+from app.core.config import get_settings  # noqa: E402
 from app.db.session import current_user_id  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -134,6 +135,15 @@ async def personal_tenant_override(user_id: str, email: str | None = None) -> Te
 
 
 async def run_user_foundation_tests(runner) -> None:
+    _saved_org_enabled = get_settings().ORG_ENABLED
+    get_settings().ORG_ENABLED = False
+    try:
+        await _run_user_foundation_tests_body(runner)
+    finally:
+        get_settings().ORG_ENABLED = _saved_org_enabled
+
+
+async def _run_user_foundation_tests_body(runner) -> None:
     _install_fake_supabase()
 
     user_a_id = f"usr-a-{uuid.uuid4().hex[:8]}"
@@ -269,7 +279,8 @@ async def run_user_foundation_tests(runner) -> None:
         runner.assert_true(res_create.status_code == 501, "POST /organizations returns 501 when frozen", f"status={res_create.status_code}")
         res_switch = await client.post("/api/v1/auth/switch-org", json={"organization_id": "org-x"})
         runner.assert_true(res_switch.status_code == 501, "POST /auth/switch-org returns 501 when frozen", f"status={res_switch.status_code}")
-        detail = res_list.json().get("detail")
+        body = res_list.json()
+        detail = body.get("detail") if isinstance(body, dict) else None
         runner.assert_true(
             detail == "Organization accounts are coming soon.",
             "501 detail carries the coming-soon message",

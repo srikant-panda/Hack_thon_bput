@@ -588,7 +588,6 @@ POST   /api/v1/enforcement/blocked-senders/{block_id}/release`,
         rows: [
           ['Connected (Realtime)', 'Supabase channel subscription SUBSCRIBED', 'Green dot LIVE pill', 'Instant push via broadcast event (<3s)'],
           ['Degraded (Polling)', 'Connection timeout (>5s) or CHANNEL_ERROR', 'Amber dot POLLING pill', 'Background interval fetch every 60s'],
-          ['Demo / Mock Mode', 'VITE_USE_MOCK=true', 'Amber DEMO pill', 'Manual user scan trigger only'],
         ],
       },
     ],

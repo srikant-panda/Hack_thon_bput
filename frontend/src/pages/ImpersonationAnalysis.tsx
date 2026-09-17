@@ -53,7 +53,7 @@ export default function ImpersonationAnalysis() {
 
   const handleExecute = (actionId: string) => {
     const action = result?.recommendedActions.find((a) => a.id === actionId);
-    addToast(`Response executed (simulated): ${action?.action ?? actionId}`, 'safe');
+    addToast(`Action acknowledged: ${action?.action ?? actionId}`, 'safe');
   };
 
   return (

@@ -2,12 +2,12 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-ARG VITE_USE_MOCK=false
-ARG VITE_API_BASE_URL=http://localhost:8000/api/v1
+# VITE_API_BASE_URL stays relative ("/api/v1"): the browser calls the same
+# origin it loaded the page from, and nginx proxies /api/* to the backend.
+ARG VITE_API_BASE_URL=/api/v1
 ARG VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
 ARG VITE_SUPABASE_ANON_KEY=your-anon-key
-ENV VITE_USE_MOCK=$VITE_USE_MOCK \
-    VITE_API_BASE_URL=$VITE_API_BASE_URL \
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
     VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
     VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 
@@ -17,7 +17,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Serve stage: Nginx with SPA fallback.
+# Serve stage: Nginx — serves the SPA at / and reverse-proxies /api/*.
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf

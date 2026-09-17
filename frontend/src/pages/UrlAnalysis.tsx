@@ -12,7 +12,6 @@ import RecommendedActionsPanel from '../components/common/RecommendedActionsPane
 import { PanelSkeleton } from '../components/common/LoadingSkeleton';
 import { useUiStore } from '../store/uiStore';
 import { useAuthStore } from '../store/authStore';
-import { ArrowRight } from 'lucide-react';
 
 const SAFE_SAMPLE = 'https://www.github.com/login';
 const MALICIOUS_SAMPLE = 'http://secure-account-verification.micr0soft-support.xyz/auth/session?id=88213';
@@ -153,22 +152,6 @@ export default function UrlAnalysis() {
                 </div>
               </div>
             )}
-
-            {result.redirectChain && result.redirectChain.length > 0 && (
-              <div className="rounded-xl border border-red-600/40 bg-red-600/5 p-4">
-                <h3 className="mb-3 text-sm font-semibold text-red-400">Simulated Redirect Chain</h3>
-                <div className="space-y-2">
-                  {result.redirectChain.map((hop, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <div className="flex-1 break-all rounded-lg border border-zinc-700/50 bg-zinc-800/60 px-2.5 py-1.5 font-mono text-[11px] text-zinc-300">
-                        {hop}
-                      </div>
-                      {i < result.redirectChain!.length - 1 && <ArrowRight className="h-3.5 w-3.5 shrink-0 text-red-400" />}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Right: analysis */}
@@ -223,7 +206,7 @@ export default function UrlAnalysis() {
                 actions={result.recommendedActions}
                 onExecute={(actionId) => {
                   const action = result.recommendedActions.find((a) => a.id === actionId);
-                  addToast(`Response executed (simulated): ${action?.action ?? actionId}`, 'safe');
+                  addToast(`Action acknowledged: ${action?.action ?? actionId}`, 'safe');
                 }}
               />
             </div>

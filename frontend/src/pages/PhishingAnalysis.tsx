@@ -54,7 +54,7 @@ export default function PhishingAnalysis() {
 
   const handleExecute = (actionId: string) => {
     const action = result?.recommendedActions.find((a: RecommendedAction) => a.id === actionId);
-    addToast(`Response executed (simulated): ${action?.action ?? actionId}`, 'safe');
+    addToast(`Action acknowledged: ${action?.action ?? actionId}`, 'safe');
   };
 
   return (

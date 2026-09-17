@@ -37,7 +37,6 @@ function formatWhen(iso: string | null): string {
 }
 
 export default function QuarantineQueue() {
-  const isMockMode = api.isMockMode();
   const [items, setItems] = useState<QuarantinedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
@@ -221,12 +220,7 @@ export default function QuarantineQueue() {
         description="Messages quarantined at Gmail by auto-enforcement. Release returns them to the inbox; delete trashes or permanently removes them per your connector settings."
         actions={
           <div className="flex items-center gap-2">
-            {isMockMode ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300">
-                <span className="h-2 w-2 rounded-full bg-amber-400" />
-                DEMO
-              </span>
-            ) : isConnected ? (
+            {isConnected ? (
               <span
                 title="Supabase Realtime subscription active"
                 className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-400"
@@ -254,13 +248,6 @@ export default function QuarantineQueue() {
           </div>
         }
       />
-
-      {isMockMode && (
-        <div className="flex items-center gap-2 rounded-lg border border-zinc-700/60 bg-zinc-800/40 px-3.5 py-2.5 text-xs text-zinc-300">
-          <AlertTriangle className="h-4 w-4 text-amber-400" />
-          <span className="font-mono font-bold tracking-wider">DEMO MODE — enforcement actions are simulated/unavailable</span>
-        </div>
-      )}
 
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-300">
@@ -295,7 +282,7 @@ export default function QuarantineQueue() {
                 setActionId(null);
               }
             }}
-            disabled={actionId === pendingUnblock.blockId || isMockMode}
+            disabled={actionId === pendingUnblock.blockId}
             className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 disabled:opacity-50"
           >
             {actionId === pendingUnblock.blockId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldOff className="h-3.5 w-3.5" />}
@@ -390,7 +377,7 @@ export default function QuarantineQueue() {
                       <button
                         type="button"
                         onClick={() => handleRelease(item)}
-                        disabled={actionId === item.id || isMockMode}
+                        disabled={actionId === item.id}
                         className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-50"
                       >
                         {actionId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Inbox className="h-3.5 w-3.5" />}
@@ -399,7 +386,7 @@ export default function QuarantineQueue() {
                       <button
                         type="button"
                         onClick={() => handleReleaseAndTrust(item)}
-                        disabled={actionId === item.id || isMockMode}
+                        disabled={actionId === item.id}
                         className="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 disabled:opacity-50"
                       >
                         {actionId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
@@ -408,7 +395,7 @@ export default function QuarantineQueue() {
                       <button
                         type="button"
                         onClick={() => handleDelete(item)}
-                        disabled={actionId === item.id || isMockMode}
+                        disabled={actionId === item.id}
                         className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-50"
                       >
                         {actionId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -537,7 +524,7 @@ export default function QuarantineQueue() {
                       <button
                         type="button"
                         onClick={() => handleReleaseAndTrust(selected)}
-                        disabled={actionId === selected.id || isMockMode}
+                        disabled={actionId === selected.id}
                         className="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 disabled:opacity-50"
                       >
                         {actionId === selected.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}

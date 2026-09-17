@@ -1,4 +1,4 @@
-import { getSeverityFromScore } from '../../services/mockEngine';
+import { getSeverityFromScore } from '../../services/severity';
 import { SEVERITY_COLORS } from '../../theme';
 import { SEVERITY_STYLES } from './SeverityBadge';
 

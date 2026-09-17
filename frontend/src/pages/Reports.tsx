@@ -6,7 +6,7 @@ import { useUiStore } from '../store/uiStore';
 import PageHeader from '../components/common/PageHeader';
 import { PanelSkeleton } from '../components/common/LoadingSkeleton';
 import { formatTime } from '../constants';
-import { SEVERITY_COLORS, getSeverityFromScore } from '../services/mockEngine';
+import { SEVERITY_COLORS, getSeverityFromScore } from '../services/severity';
 
 export default function Reports() {
   const addToast = useUiStore((s) => s.addToast);
@@ -28,9 +28,7 @@ export default function Reports() {
     if (!summary || !alerts) return;
     const report = {
       generatedAt: new Date().toISOString(),
-      note: api.isMockMode()
-        ? 'CYBERGUARD mock-mode report. All data is simulated.'
-        : 'CYBERGUARD report generated from the live backend.',
+      note: 'CYBERGUARD report generated from the live backend.',
       summary: {
         totalEventsAnalyzed: summary.totalEventsAnalyzed,
         threatsDetected: summary.threatsDetected,
@@ -102,7 +100,7 @@ export default function Reports() {
     <div className="space-y-5">
       <PageHeader
         title="Reports & Export"
-        description="Generate and download point-in-time threat reports. All exports are generated client-side from mock data."
+        description="Generate and download point-in-time threat reports from live backend data. Exports are assembled client-side from the metrics shown."
         actions={
           <>
             <button

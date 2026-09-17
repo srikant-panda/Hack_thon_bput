@@ -252,7 +252,7 @@ export default function AccountTakeover() {
                 actions={result.recommendedActions}
                 onExecute={(actionId) => {
                   const action = result.recommendedActions.find((a) => a.id === actionId);
-                  addToast(`Response executed (simulated): ${action?.action ?? actionId}`, 'safe');
+                  addToast(`Action acknowledged: ${action?.action ?? actionId}`, 'safe');
                 }}
               />
             </>

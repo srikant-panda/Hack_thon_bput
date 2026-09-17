@@ -57,7 +57,7 @@ const QUICK_ACTIONS = [
   'What should I investigate first?',
 ];
 
-const MODE_SUBTITLE = api.isMockMode() ? 'Mock Mode' : 'Live Backend';
+const MODE_SUBTITLE = 'Live Backend';
 
 interface Props {
   open: boolean;
@@ -70,9 +70,7 @@ export default function SocAssistant({ open, userName, onClose }: Props) {
     const welcome: ChatMessage = {
       id: 'welcome',
       role: 'assistant',
-      content: api.isMockMode()
-        ? `Hello ${userName}. I'm the SOC Assistant running in mock mode. Ask me about today's threats, critical alerts, MITRE techniques, or what to investigate first.`
-        : `Hello ${userName}. I'm the SOC Assistant, connected to the live backend. Ask me about today's threats, critical alerts, MITRE techniques, or what to investigate first.`,
+      content: `Hello ${userName}. I'm the SOC Assistant, connected to the live backend. Ask me about today's threats, critical alerts, MITRE techniques, or what to investigate first.`,
       timestamp: Date.now(),
     };
     return _loadSessionChat() ?? [welcome];

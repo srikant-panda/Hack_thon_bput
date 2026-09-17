@@ -6,15 +6,12 @@ import Toast from '../common/Toast';
 import SocAssistant from './SocAssistant';
 import { useUiStore } from '../../store/uiStore';
 import { useAuthStore } from '../../store/authStore';
-import { generateSimulatedAlert } from '../../services/mockApi';
-import { addAlert } from '../../services/api';
 
 export default function MainLayout() {
   const toasts = useUiStore((s) => s.toasts);
   const removeToast = useUiStore((s) => s.removeToast);
   const assistantOpen = useUiStore((s) => s.assistantOpen);
   const setAssistantOpen = useUiStore((s) => s.setAssistantOpen);
-  const liveSimulation = useUiStore((s) => s.liveSimulation);
   const user = useAuthStore((s) => s.user);
 
   // Toast auto-dismiss after 5 seconds
@@ -23,17 +20,6 @@ export default function MainLayout() {
     const timers = toasts.map((t) => setTimeout(() => removeToast(t.id), 5000));
     return () => timers.forEach(clearTimeout);
   }, [toasts, removeToast]);
-
-  // Live simulation: generate a new alert every 20 seconds
-  useEffect(() => {
-    if (!liveSimulation) return;
-    const interval = setInterval(() => {
-      const alert = generateSimulatedAlert();
-      addAlert(alert);
-      useUiStore.getState().addToast(`New alert: ${alert.title}`, alert.severity);
-    }, 20000);
-    return () => clearInterval(interval);
-  }, [liveSimulation]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
