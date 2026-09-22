@@ -32,6 +32,10 @@ async def get_or_create_gmail_account(
 
     now = datetime.now(timezone.utc)
     if account is not None:
+        account.status = "ACTIVE"
+        account.disconnected_at = None
+        account.sync_status = "active"
+        account.last_error = None
         account.set_access_token(access_token)
         account.set_refresh_token(refresh_token)
         account.updated_at = now
@@ -42,6 +46,8 @@ async def get_or_create_gmail_account(
     account = GmailAccount(
         owner_user_id=owner_user_id,
         email=email,
+        status="ACTIVE",
+        disconnected_at=None,
         sync_status="active",
         last_history_id=None,
         watch_expiration=None,

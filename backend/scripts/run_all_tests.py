@@ -1065,6 +1065,14 @@ async def run_tests():
 
     await run_org_streams_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 42. GMAIL-CONNECT-MANAGE — complete Gmail connect/disconnect lifecycle
+    # -----------------------------------------------------------------------
+    print("\n[Suite 42] GMAIL-CONNECT-MANAGE — Gmail Lifecycle & Disconnect/Reconnect")
+    from tests.test_gmail_lifecycle import run_gmail_lifecycle_tests
+
+    await run_gmail_lifecycle_tests(runner)
+
     return runner.report()
 
 

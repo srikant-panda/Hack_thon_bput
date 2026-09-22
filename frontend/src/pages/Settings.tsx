@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { AlertTriangle, Bell, CheckCircle2, Info, Loader2, Lock, Server, Shield, User } from 'lucide-react';
+import { AlertTriangle, Bell, CheckCircle2, Info, Loader2, Lock, Mail, PlugZap, Server, Shield, Unplug, User, X } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import PageHeader from '../components/common/PageHeader';
 import * as api from '../services/api';
 import { SEVERITY_COLORS } from '../theme';
 import { getSeverityFromScore } from '../services/severity';
+import { useGmailStatus } from '../hooks/useGmailStatus';
 
 const BANDS: [number, number, string][] = [
   [0, 20, 'Benign activity; no action required. Monitor-only logging.'],
@@ -21,6 +22,40 @@ export default function Settings() {
   const [notifEmail, setNotifEmail] = useState(notificationEmail ?? '');
   const [notifSaving, setNotifSaving] = useState(false);
   const [notifMsg, setNotifMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Gmail status and disconnect state
+  const { connected: isGmailConnected, email: gmailEmail, isLoading: gmailLoading, refetch: refetchGmailStatus } = useGmailStatus();
+  const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  const handleConnectGmail = async () => {
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const url = await api.authorizeGmailConnector();
+      window.location.href = url;
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : 'Failed to initiate Gmail authorization');
+      setConnecting(false);
+    }
+  };
+
+  const handleConfirmDisconnect = async () => {
+    setDisconnecting(true);
+    setDisconnectError(null);
+    try {
+      await api.disconnectGmail();
+      await refetchGmailStatus();
+      setDisconnectModalOpen(false);
+    } catch {
+      setDisconnectError('Unable to disconnect. Please try again.');
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   const saveNotificationEmail = async () => {
     setNotifSaving(true);
@@ -45,6 +80,66 @@ export default function Settings() {
   return (
     <div className="max-w-3xl space-y-5">
       <PageHeader title="Settings" description="Profile, environment and detection reference configuration." />
+
+      {/* Gmail Integration (GMAIL-CONNECT-MANAGE) */}
+      <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/60 p-5 backdrop-blur">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-red-400" />
+            <h3 className="text-sm font-semibold text-zinc-100">Gmail Integration</h3>
+          </div>
+          {gmailLoading ? (
+            <span className="flex items-center gap-1.5 rounded bg-zinc-800 px-2 py-0.5 font-mono text-[11px] text-zinc-400">
+              <Loader2 className="h-3 w-3 animate-spin" /> Checking status...
+            </span>
+          ) : isGmailConnected ? (
+            <span className="flex items-center gap-1.5 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" /> Connected
+            </span>
+          ) : (
+            <span className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-zinc-400">
+              Not connected
+            </span>
+          )}
+        </div>
+        <p className="mb-4 text-xs leading-relaxed text-zinc-400">
+          Connect your Gmail account to enable real-time threat monitoring and auto-quarantine.
+        </p>
+
+        {isGmailConnected && (
+          <div className="mb-4 rounded-lg border border-zinc-700/60 bg-zinc-900/80 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500">Connected Account</div>
+            <div className="mt-0.5 font-mono text-sm text-zinc-200">{gmailEmail || 'Gmail Mailbox'}</div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          {isGmailConnected ? (
+            <button
+              type="button"
+              onClick={() => setDisconnectModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-400 shadow-lg shadow-red-500/10 transition hover:bg-red-500/20"
+            >
+              <Unplug className="h-3.5 w-3.5" />
+              Disconnect Gmail
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleConnectGmail}
+              disabled={connecting}
+              className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-60"
+            >
+              {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              {connecting ? 'Connecting...' : 'Connect Gmail'}
+            </button>
+          )}
+        </div>
+
+        {connectError && (
+          <p className="mt-2 text-xs text-red-400">{connectError}</p>
+        )}
+      </div>
 
       {/* Email notifications (Phase 7) */}
       <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/60 p-5 backdrop-blur">
@@ -200,6 +295,58 @@ export default function Settings() {
           </p>
         </div>
       </div>
+
+      {/* Disconnect Confirmation Modal */}
+      {disconnectModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-400" />
+                <h3 className="text-sm font-bold text-zinc-100">Disconnect Gmail</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !disconnecting && setDisconnectModalOpen(false)}
+                disabled={disconnecting}
+                className="text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="mb-6 text-xs leading-relaxed text-zinc-400">
+              This will stop Gmail monitoring, remove stored credentials, and disable email scanning. You can reconnect later.
+            </p>
+
+            {disconnectError && (
+              <p className="mb-4 rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+                {disconnectError}
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDisconnectModalOpen(false)}
+                disabled={disconnecting}
+                className="rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDisconnect}
+                disabled={disconnecting}
+                className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
+              >
+                {disconnecting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

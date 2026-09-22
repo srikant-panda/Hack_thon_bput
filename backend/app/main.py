@@ -23,6 +23,7 @@ from app.api import (
     routes_dashboard,
     routes_connectors,
     routes_dlq,
+    routes_gmail,
     routes_gmail_webhook,
     routes_enforcement,
     routes_db,
@@ -60,42 +61,67 @@ settings = get_settings()
 async def lifespan(_app: FastAPI):
     """Application lifespan: initialize database schema, seed data, and start background workers."""
     import asyncio
+
+    from app.db.session import dispose_db
+
     logger.info("Starting CYBERGUARD backend...")
-    await init_db()
-    rotator = get_key_rotator()
-    rotator.log_startup_summary()
-    rotator.start_background_task()
-    from app.services.scheduler import start_scheduler
-
-    start_scheduler()
-
-    # Start embedded ARQ background worker so email ingestion and threat analysis jobs process automatically
     embedded_worker = None
     worker_task = None
+    rotator = None
+
     try:
-        from arq.worker import create_worker
-        from app.workers.email_worker import WorkerSettings as EmailWorkerSettings
+        await init_db()
+        rotator = get_key_rotator()
+        rotator.log_startup_summary()
+        rotator.start_background_task()
+        from app.services.scheduler import start_scheduler
 
-        embedded_worker = create_worker(EmailWorkerSettings)
-        worker_task = asyncio.create_task(embedded_worker.async_run())
-        logger.info("Embedded ARQ background worker started for email ingestion & threat analysis.")
-    except Exception as exc:
-        logger.warning("Could not start embedded ARQ worker (external worker can still be used): %s", exc)
+        start_scheduler()
 
-    yield
-    logger.info("Shutting down CYBERGUARD backend...")
-    rotator.stop_background_task()
-    from app.services.scheduler import stop_scheduler
-
-    stop_scheduler()
-
-    if embedded_worker:
+        # Start embedded ARQ background worker so email ingestion and threat analysis jobs process automatically
         try:
-            await embedded_worker.close()
+            from arq.worker import create_worker
+            from app.workers.email_worker import WorkerSettings as EmailWorkerSettings
+
+            embedded_worker = create_worker(EmailWorkerSettings)
+            worker_task = asyncio.create_task(embedded_worker.async_run())
+            logger.info("Embedded ARQ background worker started for email ingestion & threat analysis.")
+        except Exception as exc:
+            logger.warning("Could not start embedded ARQ worker (external worker can still be used): %s", exc)
+
+        yield
+    finally:
+        logger.info("Shutting down CYBERGUARD backend...")
+        if rotator is not None:
+            try:
+                rotator.stop_background_task()
+            except Exception:
+                pass
+
+        try:
+            from app.services.scheduler import stop_scheduler
+
+            stop_scheduler()
         except Exception:
             pass
-    if worker_task:
-        worker_task.cancel()
+
+        if embedded_worker:
+            try:
+                await embedded_worker.close()
+            except Exception:
+                pass
+        if worker_task:
+            worker_task.cancel()
+            try:
+                await asyncio.gather(worker_task, return_exceptions=True)
+            except Exception:
+                pass
+
+        # Gracefully dispose all database connection pools
+        try:
+            await dispose_db()
+        except Exception as exc:
+            logger.warning("Error disposing database engines on shutdown: %s", exc)
 
 
 app = FastAPI(
@@ -146,6 +172,8 @@ app.include_router(routes_security_history.router, prefix=settings.API_V1_PREFIX
 app.include_router(routes_security_history.review_router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_enforcement.router, prefix=settings.API_V1_PREFIX)
 app.include_router(routes_gmail_webhook.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_gmail.router, prefix=settings.API_V1_PREFIX)
+app.include_router(routes_gmail.router)
 app.include_router(routes_dlq.router, prefix=settings.API_V1_PREFIX)
 
 # Register unified exception handlers

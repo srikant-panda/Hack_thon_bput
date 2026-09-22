@@ -189,6 +189,24 @@ async def disconnect_connector(
     connector.access_token_expires_at = None
     connector.last_error = revoke_note  # None on a clean revoke
 
+    if connector.provider == "gmail":
+        from datetime import datetime, timezone
+        from sqlalchemy import func
+        from app.db.models import GmailAccount
+        gm_stmt = select(GmailAccount).where(
+            GmailAccount.owner_user_id == connector.owner_user_id,
+            func.lower(GmailAccount.email) == connector.provider_email.lower(),
+        )
+        gm_acc = (await db.execute(gm_stmt)).scalar_one_or_none()
+        if gm_acc is not None:
+            gm_acc.status = "DISCONNECTED"
+            gm_acc.disconnected_at = datetime.now(timezone.utc)
+            gm_acc.set_refresh_token(None)
+            gm_acc.set_access_token(None)
+            gm_acc.last_history_id = None
+            gm_acc.watch_expiration = None
+            gm_acc.sync_status = "paused"
+
     await log_operation(
         db,
         owner_user_id=connector.owner_user_id,

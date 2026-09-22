@@ -18,6 +18,7 @@ import {
 import PageHeader from '../components/common/PageHeader';
 import VerboseResultPanel from '../components/common/VerboseResultPanel';
 import * as api from '../services/api';
+import { useGmailStatus } from '../hooks/useGmailStatus';
 import { formatLocal } from '../utils/datetime';
 import type {
   ConnectorSettings,
@@ -104,11 +105,16 @@ export default function EmailConnectors() {
     return () => clearInterval(interval);
   }, [loadActivity, autoRefreshActivity]);
 
+  const { connected: isGmailConnected, email: gmailEmail, refetch: refetchGmailStatus } = useGmailStatus();
+  const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const [pendingDisconnectConnector, setPendingDisconnectConnector] = useState<EmailConnectorAccount | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setActionError(null);
     try {
-      const [caps, conns] = await Promise.all([api.listConnectorCapabilities(), api.listEmailConnectors()]);
+      const [caps, conns] = await Promise.all([api.listConnectorCapabilities(), api.listEmailConnectors(), refetchGmailStatus()]);
       setRegistry(caps);
       setConnectors(conns);
     } catch (err) {
@@ -116,7 +122,7 @@ export default function EmailConnectors() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refetchGmailStatus]);
 
   useEffect(() => {
     load();
@@ -226,15 +232,34 @@ export default function EmailConnectors() {
     }
   };
 
-  const handleDisconnect = async (connector: EmailConnectorAccount) => {
+  const requestDisconnect = (connector: EmailConnectorAccount) => {
+    if (connector.provider === 'gmail') {
+      setPendingDisconnectConnector(connector);
+      setDisconnectError(null);
+      setDisconnectModalOpen(true);
+    } else {
+      executeDisconnect(connector);
+    }
+  };
+
+  const executeDisconnect = async (connector: EmailConnectorAccount) => {
     setDisconnectingId(connector.id);
     setActionError(null);
     setTestResult(null);
     try {
+      if (connector.provider === 'gmail') {
+        await api.disconnectGmail();
+      }
       await api.disconnectEmailConnector(connector.id);
-      await load();
+      await Promise.all([load(), refetchGmailStatus()]);
+      setDisconnectModalOpen(false);
+      setPendingDisconnectConnector(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to disconnect');
+      if (disconnectModalOpen) {
+        setDisconnectError('Unable to disconnect. Please try again.');
+      } else {
+        setActionError(err instanceof Error ? err.message : 'Failed to disconnect');
+      }
     } finally {
       setDisconnectingId(null);
     }
@@ -313,7 +338,30 @@ export default function EmailConnectors() {
               <p className="mt-1 flex-1 text-xs leading-relaxed text-zinc-500">
                 {entry!.detail || (entry!.status === 'enabled' ? 'Ready to connect with mailbox modify access.' : '')}
               </p>
-              {isGmail && (
+              {isGmail && isGmailConnected ? (
+                <div className="mt-4 flex flex-col gap-2">
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span className="truncate font-mono text-[11px]">{gmailEmail || 'Connected'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const gm = connectors.find((c) => c.provider === 'gmail');
+                      if (gm) {
+                        requestDisconnect(gm);
+                      } else {
+                        setPendingDisconnectConnector({ id: 'gmail', provider: 'gmail', provider_email: gmailEmail || '' } as any);
+                        setDisconnectModalOpen(true);
+                      }
+                    }}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20"
+                  >
+                    <Unplug className="h-3.5 w-3.5" />
+                    Disconnect Gmail
+                  </button>
+                </div>
+              ) : isGmail ? (
                 <button
                   type="button"
                   onClick={handleConnectGmail}
@@ -322,9 +370,9 @@ export default function EmailConnectors() {
                   title={gmailEnabled ? 'Connect your Gmail mailbox' : entry!.detail || 'Gmail connector is not configured yet'}
                 >
                   {authorizing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-                  Connect Gmail
+                  {authorizing ? 'Connecting...' : 'Connect Gmail'}
                 </button>
-              )}
+              ) : null}
             </div>
           );
         })}
@@ -414,7 +462,7 @@ export default function EmailConnectors() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDisconnect(connector)}
+                    onClick={() => requestDisconnect(connector)}
                     disabled={disconnectingId === connector.id}
                     className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-50"
                   >
@@ -809,6 +857,58 @@ export default function EmailConnectors() {
         never sent to the browser. Phase 3 adds mailbox scanning; quarantine and
         sender actions follow in Phase 4.
       </p>
+
+      {/* Disconnect Confirmation Modal */}
+      {disconnectModalOpen && pendingDisconnectConnector && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-400" />
+                <h3 className="text-sm font-bold text-zinc-100">Disconnect Gmail</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !disconnectingId && setDisconnectModalOpen(false)}
+                disabled={Boolean(disconnectingId)}
+                className="text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="mb-6 text-xs leading-relaxed text-zinc-400">
+              This will stop Gmail monitoring, remove stored credentials, and disable email scanning. You can reconnect later.
+            </p>
+
+            {disconnectError && (
+              <p className="mb-4 rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+                {disconnectError}
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDisconnectModalOpen(false)}
+                disabled={Boolean(disconnectingId)}
+                className="rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => executeDisconnect(pendingDisconnectConnector)}
+                disabled={Boolean(disconnectingId)}
+                className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:opacity-50"
+              >
+                {disconnectingId && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {disconnectingId ? 'Disconnecting...' : 'Disconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

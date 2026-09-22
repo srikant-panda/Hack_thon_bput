@@ -73,6 +73,11 @@ async def gmail_pubsub_webhook(request: Request) -> dict[str, Any]:
             logger.warning("Pub/Sub notification received for unknown email: %s", email_address)
             return {"status": "ignored", "reason": "unknown_email"}
 
+        # Guard: do not process events for disconnected or inactive accounts
+        if getattr(account, "status", "ACTIVE") != "ACTIVE":
+            logger.info("Gmail account %s is %s; ignoring Pub/Sub notification", email_address, getattr(account, "status", None))
+            return {"status": "ignored", "reason": "account_disconnected"}
+
         # Increment Prometheus metric for received Gmail webhook events
         try:
             from app.core.metrics import gmail_events_received_total
