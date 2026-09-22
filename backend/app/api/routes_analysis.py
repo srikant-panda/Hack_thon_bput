@@ -37,6 +37,7 @@ from app.services.account_takeover_detector import analyze_auth_log_heuristics
 from app.services.alert_service import create_alert
 from app.services.deepfake_detector import analyze_media
 from app.services.impersonation_detector import analyze_impersonation_heuristics
+from app.services.domain_intelligence import live_enrich_url
 from app.services.ml_inference import score_with_ml
 from app.services.network_threat_detector import analyze_network_heuristics
 from app.services.phishing_detector import analyze_email_heuristics
@@ -199,6 +200,8 @@ async def analyze_url(
     """Full malicious URL analysis pipeline for a single URL."""
     raw_data = payload.model_dump(mode="json")
     indicators = await asyncio.to_thread(analyze_url_heuristics, payload.url)
+    # Firecrawl live enrichment (optional; additive heuristics-side indicators).
+    indicators = await live_enrich_url(payload.url, indicators)
     return await _run_analysis_pipeline(
         db,
         tenant,

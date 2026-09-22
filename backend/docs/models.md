@@ -10,6 +10,7 @@ CYBERGUARD's detection layer is a **transparent heuristic engine** (rule-based f
 - `calculate_score(indicators)` sums weights, capped at 100.
 - `get_severity(score)` maps to bands: **safe 0–20, low 21–40, medium 41–60, high 61–80, critical 81–100**.
 - Alert pipeline: `risk_score = max(round(manipulation_probability * 100), indicator_score)` for media; pure indicator score elsewhere.
+- **Firecrawl content-derived indicators** (`lookalike_domain_confirmed`, `lookalike_domain_candidate`, `live_credential_form`, `redirect_domain_mismatch`, `local_internal_domain` — see [FIRECRAWL_INTEGRATION.md](FIRECRAWL_INTEGRATION.md)) are **heuristic-side only**: they enter `calculate_score` like any other heuristic and never touch the ML indicator or the blend — the monotonic `max(heuristic, blend)` in `ml_inference.blend_scores` guarantees live page content can only raise, never lower, the final ML-blended verdict.
 
 ## Detection modules
 
