@@ -1079,6 +1079,13 @@ async def run_tests():
     from scripts.test_org_dashboard import run_org_dashboard_tests
     await run_org_dashboard_tests(runner)
 
+    # -----------------------------------------------------------------------
+    # 52. LOG-ML-P2 — log features, heuristic layer, baseline model, blend
+    # -----------------------------------------------------------------------
+    print("\n[Suite 52] LOG-ML-P2 — Log Threat Model v1")
+    from scripts.test_log_ml import run_log_ml_tests
+    run_log_ml_tests(runner)
+
     return runner.report()
 
 

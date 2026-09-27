@@ -1,6 +1,15 @@
 # Log Threat Dataset — Provenance & Normalization (LOG-ML-P1)
 
-Status: dataset acquisition + label audit only. **No model code yet** (training comes in a later phase, mirroring `ML_MODELS.md`).
+Status: dataset acquisition + label audit done (P1); **baseline model v1 trained (LOG-ML-P2)** — see §8. Inference wiring into the analyzer contract is a later phase.
+
+## 8. Baseline model v1 (LOG-ML-P2)
+
+Artifacts: `backend/models/log_threat_v1.pkl` (joblib bundle: XGBoost + TF-IDF vectorizer + numeric feature list) and `backend/models/log_threat_v1_features.json` (manifest: metrics, vectorizer params, split config, CSV SHA256).
+
+- Code: features `backend/app/services/log_features.py` (single implementation shared by training + future serving), heuristic layer `backend/app/services/log_heuristic.py`, monotonic blend `backend/app/services/log_blend.py` (ML may raise, never lower, strong heuristics), training script `scripts/train_log_model_v1.py`.
+- Split: group-aware 80/10/10 on `split_key` (train 91,916 / val 10,857 / test 11,666 rows), benign subsampled to 3× threats in train only (26,300 rows).
+- Metrics (test set): accuracy 0.9703, **macro-F1 0.7671** (baseline target >0.7 met). Per-class F1: benign 0.985, suspicious 0.912, malicious 0.404.
+- Known limitation: malicious recall 0.316 is dominated by HDFS anomaly blocks whose EventTemplates also occur in benign blocks — line-level content alone cannot fully separate them; block/trace context features are the v2 lever. Eval harness on 10 curated samples: 6/10 exact severity (the 4 misses are contract raises — ML lifts heuristic medium→critical at p>0.95 — and the blend's info→low output floor, per the LOG-ML-P2 contract).
 
 Raw data lives in `data/datasets/log_threat/raw/` (**gitignored** — not committed). The unified CSV and the label audit are derived artifacts (`log_threat_unified.csv`, `label_audit.json`, also gitignored). The committed artifacts are this doc, `data/datasets/log_threat/normalize.py`, and `data/datasets/log_threat/provenance.json` (machine-readable provenance, same content as below).
 
