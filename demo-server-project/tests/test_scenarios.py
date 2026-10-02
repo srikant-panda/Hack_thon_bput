@@ -11,7 +11,12 @@ from demo_server.scenarios import (
     parse_mix,
 )
 
-EXPECTED_COUNTS = {"net_critical": 3, "net_benign": 5, "ato_critical": 3, "ato_benign": 3}
+EXPECTED_COUNTS = {
+    "net_critical": 3,
+    "net_benign": 5,
+    "ato_critical": 3,
+    "ato_benign": 3,
+}
 
 
 def test_scenario_files_complete_with_metadata():
@@ -28,7 +33,11 @@ def test_scenario_files_complete_with_metadata():
 def test_parse_mix_valid_and_default():
     assert parse_mix(None) == {"net": 15, "ato": 15, "benign": 70}
     assert parse_mix("") == {"net": 15, "ato": 15, "benign": 70}
-    assert parse_mix("net=30,ato=20,benign=50") == {"net": 30.0, "ato": 20.0, "benign": 50.0}
+    assert parse_mix("net=30,ato=20,benign=50") == {
+        "net": 30.0,
+        "ato": 20.0,
+        "benign": 50.0,
+    }
     with pytest.raises(ScenarioError, match="sum to 100"):
         parse_mix("net=50,ato=20")
     with pytest.raises(ScenarioError, match="not a number"):
@@ -49,4 +58,9 @@ def test_scenario_book_group_mapping_and_rotation():
     assert cats == {"net_benign", "ato_benign"}  # rotates across both
     assert all(t.action == "analyze_network" for t in [book.pick("net")])
     assert set(MIX_GROUPS["net"]) == {"net_critical"}
-    assert set(CATEGORY_FILES) == {"net_critical", "net_benign", "ato_critical", "ato_benign"}
+    assert set(CATEGORY_FILES) == {
+        "net_critical",
+        "net_benign",
+        "ato_critical",
+        "ato_benign",
+    }

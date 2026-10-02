@@ -1,0 +1,49 @@
+{
+  "name": "cred_stuffing",
+  "description": "Multi-stage credential stuffing and account takeover sequence (failed burst, impossible travel, success after failures)",
+  "default_attacker_ip": "198.51.100.44",
+  "stages": [
+    {
+      "name": "stage1_failed_burst",
+      "action": "analyze_ato",
+      "expected_severity": "high",
+      "delay_s": 0.5,
+      "description": "Failed login burst against service account (brute force trigger)",
+      "payload": {
+        "events": [
+          {"user": "victim.user", "status": "failed", "timestamp": "2026-09-27T03:00:01Z", "ip": "{attacker_ip}", "location": "Moscow", "device": "python-requests/2.28"},
+          {"user": "victim.user", "status": "failed", "timestamp": "2026-09-27T03:00:04Z", "ip": "{attacker_ip}", "location": "Moscow", "device": "python-requests/2.28"},
+          {"user": "victim.user", "status": "failed", "timestamp": "2026-09-27T03:00:08Z", "ip": "{attacker_ip}", "location": "Moscow", "device": "python-requests/2.28"},
+          {"user": "victim.user", "status": "failed", "timestamp": "2026-09-27T03:00:12Z", "ip": "{attacker_ip}", "location": "Moscow", "device": "python-requests/2.28"}
+        ]
+      }
+    },
+    {
+      "name": "stage2_impossible_travel",
+      "action": "analyze_ato",
+      "expected_severity": "critical",
+      "delay_s": 1.0,
+      "description": "Berlin -> Sydney impossible travel login anomaly (T1078 Valid Accounts)",
+      "payload": {
+        "events": [
+          {"user": "d.mehta", "status": "success", "timestamp": "2026-09-27T03:00:00Z", "ip": "94.134.160.8", "location": "Berlin", "device": "macbook-pro"},
+          {"user": "d.mehta", "status": "success", "timestamp": "2026-09-27T03:25:00Z", "ip": "{attacker_ip}", "location": "Sydney", "device": "win-kiosk"}
+        ]
+      }
+    },
+    {
+      "name": "stage3_success_after_burst",
+      "action": "analyze_ato",
+      "expected_severity": "high",
+      "delay_s": 0.5,
+      "description": "Scripted credential stuffing success after consecutive failures",
+      "payload": {
+        "events": [
+          {"user": "a.okafor", "status": "failed", "timestamp": "2026-09-27T03:10:01Z", "ip": "{attacker_ip}", "location": "Amsterdam", "device": "python-requests/2.31"},
+          {"user": "a.okafor", "status": "failed", "timestamp": "2026-09-27T03:10:05Z", "ip": "{attacker_ip}", "location": "Amsterdam", "device": "python-requests/2.31"},
+          {"user": "a.okafor", "status": "success", "timestamp": "2026-09-27T03:10:10Z", "ip": "{attacker_ip}", "location": "Amsterdam", "device": "python-requests/2.31"}
+        ]
+      }
+    }
+  ]
+}

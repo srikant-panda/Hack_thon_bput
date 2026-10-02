@@ -105,7 +105,9 @@ class GatewayShipper:
                 action=action,
                 request={"action": action, "data": payload},
                 status=status or TRANSPORT_ERROR,
-                response=response_body if status is not None and status != TRANSPORT_ERROR else None,
+                response=response_body
+                if status is not None and status != TRANSPORT_ERROR
+                else None,
                 latency_ms=elapsed_ms,
                 error=error,
             )

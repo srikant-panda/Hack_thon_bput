@@ -36,7 +36,9 @@ class ResponseStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: FastAPI endpoints run in a threadpool and
         # the traffic job runs in its own thread; access is serialized via lock.
-        self._conn = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
+        self._conn = sqlite3.connect(
+            self.path, isolation_level=None, check_same_thread=False
+        )
         self._conn.row_factory = sqlite3.Row
         self.lock = threading.Lock()
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -58,17 +60,17 @@ class ResponseStore:
         """Record one attempt; returns the row id."""
         with self.lock:
             cur = self._conn.execute(
-            "INSERT INTO gateway_calls (ts, action, request_json, status, response_json, latency_ms, error) "
-            "VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)",
-            (
-                action,
-                _dump(request),
-                str(status),
-                _dump(response) if response is not None else None,
-                latency_ms,
-                error,
-            ),
-        )
+                "INSERT INTO gateway_calls (ts, action, request_json, status, response_json, latency_ms, error) "
+                "VALUES (datetime('now'), ?, ?, ?, ?, ?, ?)",
+                (
+                    action,
+                    _dump(request),
+                    str(status),
+                    _dump(response) if response is not None else None,
+                    latency_ms,
+                    error,
+                ),
+            )
         return int(cur.lastrowid)
 
     def query(

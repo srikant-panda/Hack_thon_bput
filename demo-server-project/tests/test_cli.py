@@ -5,13 +5,13 @@ import json
 import httpx
 import pytest
 
-import demo_server.__main__ as cli_main
-from demo_server.__main__ import main
+import demo_server.cli as cli_main
+from demo_server.cli import main
 from demo_server.config import load_config
 from demo_server.shipper import GatewayShipper
 from demo_server.store import ResponseStore
 
-SECRET = "cg_org_cli_test_key"
+SECRET = "ds_demo_cli_test_key"
 ENV = {"CYBERGUARD_PROJECT_SLUG": "cli-proj", "CYBERGUARD_MASTER_KEY": SECRET}
 
 
@@ -27,13 +27,23 @@ def patched_components(monkeypatch, tmp_path, handler):
     store = ResponseStore(tmp_path / "responses.db")
     client = httpx.Client(transport=httpx.MockTransport(handler), timeout=5)
     shipper = GatewayShipper(config, store, client=client, sleeper=lambda _s: None)
-    monkeypatch.setattr(cli_main, "build_components", lambda env=None: (config, store, shipper))
+    monkeypatch.setattr(
+        cli_main, "build_components", lambda env=None: (config, store, shipper)
+    )
     return config, store, shipper
 
 
 def test_ship_once_success_table(tmp_path, monkeypatch, capsys):
     def handler(request):
-        return httpx.Response(200, json={"event_id": "e1", "risk_score": 90, "severity": "critical", "verdict": "pending_review"})
+        return httpx.Response(
+            200,
+            json={
+                "event_id": "e1",
+                "risk_score": 90,
+                "severity": "critical",
+                "verdict": "pending_review",
+            },
+        )
 
     patched_components(monkeypatch, tmp_path, handler)
     path = payload_file(
@@ -53,8 +63,18 @@ def test_ship_once_mixed_results_exit_code(tmp_path, monkeypatch, capsys):
     def handler(request):
         body = json.loads(request.read())
         if body["action"] == "analyze_ato":
-            return httpx.Response(403, json={"detail": "Viewer keys cannot perform analysis actions"})
-        return httpx.Response(200, json={"event_id": "e2", "risk_score": 15, "severity": "low", "verdict": "pending_review"})
+            return httpx.Response(
+                403, json={"detail": "Viewer keys cannot perform analysis actions"}
+            )
+        return httpx.Response(
+            200,
+            json={
+                "event_id": "e2",
+                "risk_score": 15,
+                "severity": "low",
+                "verdict": "pending_review",
+            },
+        )
 
     patched_components(monkeypatch, tmp_path, handler)
     path = payload_file(
@@ -72,7 +92,9 @@ def test_ship_once_mixed_results_exit_code(tmp_path, monkeypatch, capsys):
 
 
 def test_ship_once_missing_file_errors(tmp_path, monkeypatch, capsys):
-    patched_components(monkeypatch, tmp_path, lambda request: httpx.Response(200, json={}))
+    patched_components(
+        monkeypatch, tmp_path, lambda request: httpx.Response(200, json={})
+    )
     with pytest.raises(OSError):
         main(["ship-once", "--file", str(tmp_path / "nope.json")])
 

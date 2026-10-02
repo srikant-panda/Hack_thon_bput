@@ -2,13 +2,12 @@
 store-every-attempt, endpoint/auth contract, key never stored."""
 
 import httpx
-import pytest
 
 from demo_server.config import load_config
 from demo_server.shipper import GatewayShipper
 from demo_server.store import TRANSPORT_ERROR, ResponseStore
 
-SECRET = "cg_org_test_master_key_abc123"
+SECRET = "ds_demo_test_master_key_abc123"
 ENV = {
     "CYBERGUARD_PROJECT_SLUG": "demo-proj",
     "CYBERGUARD_MASTER_KEY": SECRET,
@@ -34,7 +33,9 @@ def test_success_single_attempt_no_retry(tmp_path):
     seen = []
 
     def handler(request):
-        return httpx.Response(200, json={"event_id": "e1", "risk_score": 90, "severity": "critical"})
+        return httpx.Response(
+            200, json={"event_id": "e1", "risk_score": 90, "severity": "critical"}
+        )
 
     shipper, store, sleeps = make_shipper(tmp_path, handler, seen)
     result = shipper.ship("analyze_network", {"flows": []})
@@ -47,7 +48,9 @@ def test_success_single_attempt_no_retry(tmp_path):
     assert req.url.path == EXPECTED_PATH
     assert req.headers["Authorization"] == f"Bearer {SECRET}"
     body = req.read()
-    assert b'"action": "analyze_network"' in body or b'"action":"analyze_network"' in body
+    assert (
+        b'"action": "analyze_network"' in body or b'"action":"analyze_network"' in body
+    )
 
     rows = store.query()
     assert len(rows) == 1 and rows[0]["status"] == "200"
@@ -58,7 +61,9 @@ def test_4xx_never_retried(tmp_path):
     seen = []
 
     def handler(request):
-        return httpx.Response(403, json={"detail": "Viewer keys cannot perform analysis actions"})
+        return httpx.Response(
+            403, json={"detail": "Viewer keys cannot perform analysis actions"}
+        )
 
     shipper, store, sleeps = make_shipper(tmp_path, handler, seen)
     result = shipper.ship("analyze_network", {"flows": []})
@@ -79,7 +84,9 @@ def test_5xx_retried_until_success(tmp_path):
         calls["n"] += 1
         if calls["n"] <= 2:
             return httpx.Response(503, json={"detail": "unavailable"})
-        return httpx.Response(200, json={"event_id": "e2", "risk_score": 15, "severity": "low"})
+        return httpx.Response(
+            200, json={"event_id": "e2", "risk_score": 15, "severity": "low"}
+        )
 
     shipper, store, sleeps = make_shipper(tmp_path, handler, seen)
     result = shipper.ship("analyze_ato", {"events": []})
@@ -118,7 +125,7 @@ def test_transport_error_retried_and_stored(tmp_path):
     def handler(request):
         raise httpx.ConnectError("connection refused", request=request)
 
-    shipper, store, sleeps = make_shipper(tmp_path, handler, seen, max_retries=2)
+    shipper, store, _sleeps = make_shipper(tmp_path, handler, seen, max_retries=2)
     result = shipper.ship("analyze_network", {"flows": []})
 
     assert not result.ok
@@ -139,15 +146,21 @@ def test_no_key_material_ever_lands_in_store(tmp_path):
     seen = []
 
     def handler(request):
-        return httpx.Response(200, json={"event_id": "e3", "risk_score": 15, "severity": "low"})
+        return httpx.Response(
+            200, json={"event_id": "e3", "risk_score": 15, "severity": "low"}
+        )
 
-    shipper, store, _ = make_shipper(tmp_path, handler, seen)
+    shipper, _store, _ = make_shipper(tmp_path, handler, seen)
     result = shipper.ship("analyze_network", {"flows": [{"source_ip": "10.0.0.1"}]})
     assert result.ok
     shipper.close()
 
     db_path = tmp_path / "responses.db"
-    for candidate in (db_path, tmp_path / "responses.db-wal", tmp_path / "responses.db-shm"):
+    for candidate in (
+        db_path,
+        tmp_path / "responses.db-wal",
+        tmp_path / "responses.db-shm",
+    ):
         if candidate.exists():
             assert SECRET.encode() not in candidate.read_bytes()
 
@@ -156,7 +169,9 @@ def test_non_json_response_body_stored_as_text(tmp_path):
     seen = []
 
     def handler(request):
-        return httpx.Response(200, content=b"<html>not json</html>", headers={"content-type": "text/html"})
+        return httpx.Response(
+            200, content=b"<html>not json</html>", headers={"content-type": "text/html"}
+        )
 
     shipper, store, _ = make_shipper(tmp_path, handler, seen)
     result = shipper.ship("analyze_log", {})

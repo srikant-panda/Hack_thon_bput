@@ -21,7 +21,9 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
-SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "scenarios"
+from .config import PROJECT_ROOT
+
+SCENARIOS_DIR = PROJECT_ROOT / "scenarios"
 
 CATEGORY_FILES = {
     "net_critical": "network_critical.json",
@@ -69,7 +71,9 @@ def load_category(category: str, scenarios_dir: Path | None = None) -> list[Temp
     templates: list[Template] = []
     for i, item in enumerate(raw):
         if not isinstance(item, dict) or "action" not in item or "data" not in item:
-            raise ScenarioError(f"{path.name}[{i}] must be an object with 'action' and 'data'")
+            raise ScenarioError(
+                f"{path.name}[{i}] must be an object with 'action' and 'data'"
+            )
         templates.append(
             Template(
                 category=category,
@@ -86,7 +90,9 @@ def load_category(category: str, scenarios_dir: Path | None = None) -> list[Temp
 class ScenarioBook:
     """All categories loaded once; picks templates per mix group."""
 
-    def __init__(self, scenarios_dir: Path | None = None, rng: random.Random | None = None) -> None:
+    def __init__(
+        self, scenarios_dir: Path | None = None, rng: random.Random | None = None
+    ) -> None:
         self.rng = rng or random.Random()
         self._by_category = {
             cat: load_category(cat, scenarios_dir) for cat in CATEGORY_FILES
@@ -129,7 +135,9 @@ def parse_mix(raw: str | None) -> dict[str, float]:
         try:
             pct = float(val)
         except ValueError as exc:
-            raise ScenarioError(f"mix percent for {key!r} is not a number: {val!r}") from exc
+            raise ScenarioError(
+                f"mix percent for {key!r} is not a number: {val!r}"
+            ) from exc
         if pct < 0:
             raise ScenarioError(f"mix percent for {key!r} must be >= 0")
         out[key.strip()] = pct

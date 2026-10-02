@@ -1,0 +1,43 @@
+{
+  "name": "c2_beacon_wave",
+  "description": "Simulated command-and-control beacon wave across ports 4444, 8888, 1337 with parameterized attacker IP",
+  "default_attacker_ip": "198.51.100.23",
+  "stages": [
+    {
+      "name": "stage1_beacon_primary",
+      "action": "analyze_network",
+      "expected_severity": "critical",
+      "delay_s": 0.5,
+      "description": "Primary C2 beacon flow on port 4444",
+      "payload": {
+        "flows": [
+          {"source_ip": "10.0.9.11", "dest_ip": "{attacker_ip}", "port": 4444, "bytes_out": 2048, "protocol": "TCP", "duration_s": 60}
+        ]
+      }
+    },
+    {
+      "name": "stage2_beacon_secondary",
+      "action": "analyze_network",
+      "expected_severity": "critical",
+      "delay_s": 0.5,
+      "description": "Secondary C2 heartbeat flow on port 8888",
+      "payload": {
+        "flows": [
+          {"source_ip": "10.0.9.12", "dest_ip": "{attacker_ip}", "port": 8888, "bytes_out": 4096, "protocol": "TCP", "duration_s": 90}
+        ]
+      }
+    },
+    {
+      "name": "stage3_beacon_channel",
+      "action": "analyze_network",
+      "expected_severity": "critical",
+      "delay_s": 0.5,
+      "description": "High-frequency staging channel beacon on port 1337",
+      "payload": {
+        "flows": [
+          {"source_ip": "10.0.9.13", "dest_ip": "{attacker_ip}", "port": 1337, "bytes_out": 8192, "protocol": "TCP", "duration_s": 120}
+        ]
+      }
+    }
+  ]
+}

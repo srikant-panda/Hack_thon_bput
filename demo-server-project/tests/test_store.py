@@ -10,8 +10,21 @@ from demo_server.store import TRANSPORT_ERROR, ResponseStore
 
 def test_append_and_query_roundtrip(tmp_path):
     store = ResponseStore(tmp_path / "responses.db")
-    store.append("analyze_network", {"action": "analyze_network", "data": {"flows": []}}, "200", {"risk_score": 15}, 42)
-    store.append("analyze_ato", {"action": "analyze_ato", "data": {}}, TRANSPORT_ERROR, None, 5, "ConnectError: refused")
+    store.append(
+        "analyze_network",
+        {"action": "analyze_network", "data": {"flows": []}},
+        "200",
+        {"risk_score": 15},
+        42,
+    )
+    store.append(
+        "analyze_ato",
+        {"action": "analyze_ato", "data": {}},
+        TRANSPORT_ERROR,
+        None,
+        5,
+        "ConnectError: refused",
+    )
 
     rows = store.query()
     assert len(rows) == 2
@@ -32,7 +45,9 @@ def test_query_filters(tmp_path):
     store = ResponseStore(tmp_path / "responses.db")
 
     assert len(store.query(action="analyze_network")) == 2
-    assert all(r["action"] == "analyze_network" for r in store.query(action="analyze_network"))
+    assert all(
+        r["action"] == "analyze_network" for r in store.query(action="analyze_network")
+    )
 
     # min_status is an inclusive lower bound on numeric HTTP status;
     # transport_error rows (no numeric status) are excluded

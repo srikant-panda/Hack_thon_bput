@@ -11,16 +11,18 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from . import __version__, metrics as metrics_mod
-from .config import Config, load_config
-from .replay import ReplayError, replay as run_replay
-from .scenarios import MIX_GROUPS, ScenarioBook, ScenarioError, parse_mix
+from . import __version__
+from . import metrics as metrics_mod
+from .config import Settings, load_settings
+from .replay import ReplayError
+from .replay import replay as run_replay
+from .scenarios import ScenarioBook, ScenarioError, parse_mix
 from .shipper import GatewayShipper
 from .store import ResponseStore
 from .traffic import TrafficSummary, generate
@@ -29,9 +31,13 @@ logger = logging.getLogger("demo_server.service")
 
 
 class TrafficStartRequest(BaseModel):
-    rate: float = Field(60, gt=0, description="payloads per minute")
-    duration: float = Field(10, gt=0, description="minutes to run")
-    mix: str = Field("net=15,ato=15,benign=70", description="percentages, e.g. net=30,ato=20,benign=50")
+    # None falls back to Settings (DEFAULT_RATE / DEFAULT_DURATION)
+    rate: float | None = Field(None, gt=0, description="payloads per minute")
+    duration: float | None = Field(None, gt=0, description="minutes to run")
+    mix: str = Field(
+        "net=15,ato=15,benign=70",
+        description="percentages, e.g. net=30,ato=20,benign=50",
+    )
     jitter: float = Field(0.2, ge=0, lt=1)
 
 
@@ -93,12 +99,19 @@ def _on_ship(job: TrafficJob) -> Any:
             job.summary.by_category[_template.category] = (
                 job.summary.by_category.get(_template.category, 0) + 1
             )
-            job.summary.last_event_ts = datetime.now(timezone.utc).isoformat()
+            job.summary.last_event_ts = datetime.now(UTC).isoformat()
 
     return hook
 
 
-def _job_main(job: TrafficJob, config: Config, store: ResponseStore, shipper: GatewayShipper, book: ScenarioBook, mix: dict[str, float]) -> None:
+def _job_main(
+    job: TrafficJob,
+    config: Settings,
+    store: ResponseStore,
+    shipper: GatewayShipper,
+    book: ScenarioBook,
+    mix: dict[str, float],
+) -> None:
     try:
         summary = generate(
             shipper,
@@ -115,7 +128,10 @@ def _job_main(job: TrafficJob, config: Config, store: ResponseStore, shipper: Ga
             job.state = "stopped"  # covers both natural completion and stop request
         logger.info(
             "traffic job %s finished: shipped=%d succeeded=%d stopped_early=%s",
-            job.id, summary.events_shipped, summary.succeeded, summary.stopped_early,
+            job.id,
+            summary.events_shipped,
+            summary.succeeded,
+            summary.stopped_early,
         )
     except Exception:
         with job.lock:
@@ -124,13 +140,12 @@ def _job_main(job: TrafficJob, config: Config, store: ResponseStore, shipper: Ga
 
 
 def create_app(
-    config: Config | None = None,
+    config: Settings | None = None,
     store: ResponseStore | None = None,
     shipper: GatewayShipper | None = None,
     book: ScenarioBook | None = None,
 ) -> FastAPI:
-    cfg = config or load_config()
-    owned_store = store is None
+    cfg = config or load_settings()
     st = store or ResponseStore(cfg.store_path)
     sp = shipper or GatewayShipper(cfg, st)
     bk = book or ScenarioBook()
@@ -158,7 +173,9 @@ def create_app(
         except ScenarioError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        job = TrafficJob(str(uuid.uuid4()), req.rate, req.duration, req.mix)
+        rate = req.rate if req.rate is not None else cfg.default_rate
+        duration = req.duration if req.duration is not None else cfg.default_duration
+        job = TrafficJob(str(uuid.uuid4()), rate, duration, req.mix)
         thread = threading.Thread(
             target=_job_main,
             args=(job, cfg, st, sp, bk, mix),
@@ -170,8 +187,13 @@ def create_app(
         job.thread = thread
         thread.start()
         snap = job.snapshot()
-        return {"job_id": job.id, "state": snap["state"], "rate_per_min": req.rate,
-                "duration_min": req.duration, "mix": req.mix}
+        return {
+            "job_id": job.id,
+            "state": snap["state"],
+            "rate_per_min": rate,
+            "duration_min": duration,
+            "mix": req.mix,
+        }
 
     def _get_job(job_id: str) -> TrafficJob:
         with jobs_lock:

@@ -3,3 +3,4 @@ data/
 
 # Local scratch payloads used for live proofs
 payloads*.json
+.env

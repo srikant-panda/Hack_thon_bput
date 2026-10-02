@@ -1,44 +1,55 @@
 """Tests for attack campaign runner, registry, and CLI (SIM-1)."""
 
 import json
+
 import httpx
 import pytest
 
-import demo_server.__main__ as cli_main
-from demo_server.__main__ import main
-from demo_server.campaign import (
-    CAMPAIGNS,
-    Campaign,
+import demo_server.cli as cli_main
+from demo_server.campaign_runner import (
+    CampaignError,
     CampaignStage,
     format_campaign_table,
     get_campaign,
+    load_campaigns,
     run_campaign,
 )
+from demo_server.cli import main
 from demo_server.config import load_config
 from demo_server.shipper import GatewayShipper
 from demo_server.store import ResponseStore
 
-SECRET = "cg_org_campaign_test_key"
+SECRET = "ds_demo_campaign_test_key"
 ENV = {"CYBERGUARD_PROJECT_SLUG": "camp-proj", "CYBERGUARD_MASTER_KEY": SECRET}
 
 
 def patched_components(monkeypatch, tmp_path, handler):
     """Wire components with a mock transport."""
-    config = load_config({**ENV, "STORE_PATH": str(tmp_path / "responses.db")})
+    config = load_config(
+        {
+            **ENV,
+            "STORE_PATH": str(tmp_path / "responses.db"),
+            "REPORTS_DIR": str(tmp_path / "reports"),
+        }
+    )
     store = ResponseStore(tmp_path / "responses.db")
     client = httpx.Client(transport=httpx.MockTransport(handler), timeout=5)
     shipper = GatewayShipper(config, store, client=client, sleeper=lambda _s: None)
-    monkeypatch.setattr(cli_main, "build_components", lambda env=None: (config, store, shipper))
+    monkeypatch.setattr(
+        cli_main, "build_components", lambda env=None: (config, store, shipper)
+    )
     return config, store, shipper
 
 
 def test_01_campaign_registry():
-    """1. Campaign registry contains cred_stuffing, exfil_spike, and c2_beacon_wave."""
-    assert "cred_stuffing" in CAMPAIGNS
-    assert "exfil_spike" in CAMPAIGNS
-    assert "c2_beacon_wave" in CAMPAIGNS
+    """1. Campaign registry contains the four built-in JSON campaigns."""
+    campaigns = load_campaigns()
+    assert "cred_stuffing" in campaigns
+    assert "exfil_spike" in campaigns
+    assert "c2_beacon_wave" in campaigns
+    assert "apt_mixed" in campaigns
 
-    for name in ["cred_stuffing", "exfil_spike", "c2_beacon_wave"]:
+    for name in ["cred_stuffing", "exfil_spike", "c2_beacon_wave", "apt_mixed"]:
         camp = get_campaign(name)
         assert len(camp.stages) >= 3
         assert all(isinstance(s, CampaignStage) for s in camp.stages)
@@ -46,7 +57,7 @@ def test_01_campaign_registry():
 
 def test_02_unknown_campaign_raises():
     """2. Unknown campaign raises KeyError."""
-    with pytest.raises(KeyError, match="Unknown campaign 'non_existent'"):
+    with pytest.raises(CampaignError, match="Unknown campaign 'non_existent'"):
         get_campaign("non_existent")
 
 
@@ -108,7 +119,14 @@ def test_06_timescale_and_delay_scaling(tmp_path):
     store = ResponseStore(tmp_path / "responses.db")
 
     def handler(request):
-        return httpx.Response(200, json={"event_id": "e_test", "severity": "critical", "verdict": "pending_review"})
+        return httpx.Response(
+            200,
+            json={
+                "event_id": "e_test",
+                "severity": "critical",
+                "verdict": "pending_review",
+            },
+        )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     shipper = GatewayShipper(config, store, client=client, sleeper=lambda _s: None)
@@ -133,7 +151,15 @@ def test_07_run_campaign_severity_match(tmp_path):
         action = body.get("action")
         # Return expected severity matching the stage
         sev = "critical" if "network" in action else "high"
-        return httpx.Response(200, json={"event_id": "e_ok", "severity": sev, "verdict": "pending_review", "risk_score": 90})
+        return httpx.Response(
+            200,
+            json={
+                "event_id": "e_ok",
+                "severity": sev,
+                "verdict": "pending_review",
+                "risk_score": 90,
+            },
+        )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     shipper = GatewayShipper(config, store, client=client, sleeper=lambda _s: None)
@@ -170,7 +196,9 @@ def test_08_run_campaign_auto_block_verdict(tmp_path):
     shipper = GatewayShipper(config, store, client=client, sleeper=lambda _s: None)
 
     camp = get_campaign("c2_beacon_wave")
-    summary = run_campaign(shipper, camp, attacker_ip="198.51.100.23", sleeper=lambda _s: None)
+    summary = run_campaign(
+        shipper, camp, attacker_ip="198.51.100.23", sleeper=lambda _s: None
+    )
 
     assert summary.auto_blocked_count == 3
     assert summary.all_auto_blocked is True
@@ -191,6 +219,7 @@ def test_09_cli_campaign_list(capsys):
 
 def test_10_cli_campaign_run_and_report(tmp_path, monkeypatch, capsys):
     """10. CLI campaign run and report execute cleanly through mock transport."""
+
     def handler(request):
         return httpx.Response(
             200,
@@ -205,10 +234,25 @@ def test_10_cli_campaign_run_and_report(tmp_path, monkeypatch, capsys):
     patched_components(monkeypatch, tmp_path, handler)
 
     # 1. Run campaign
-    code_run = main(["campaign", "run", "--name", "c2_beacon_wave", "--timescale", "0.1", "--attacker-ip", "10.99.99.99"])
+    code_run = main(
+        [
+            "campaign",
+            "run",
+            "--name",
+            "c2_beacon_wave",
+            "--timescale",
+            "0.1",
+            "--attacker-ip",
+            "10.99.99.99",
+        ]
+    )
     out_run = capsys.readouterr().out
     assert code_run == 0
     assert "CLOSED-LOOP PROOF" in out_run
+    # JSON report persisted under REPORTS_DIR
+    reports = list((tmp_path / "reports").glob("c2_beacon_wave_*.json"))
+    assert len(reports) == 1
+    assert json.loads(reports[0].read_text())["campaign_name"] == "c2_beacon_wave"
 
     # 2. View report
     code_rep = main(["campaign", "report", "--limit", "5"])

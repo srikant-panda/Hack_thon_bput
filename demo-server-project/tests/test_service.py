@@ -13,7 +13,7 @@ from demo_server.service import create_app
 from demo_server.shipper import GatewayShipper
 from demo_server.store import ResponseStore
 
-SECRET = "cg_org_service_test_key"
+SECRET = "ds_demo_service_test_key"
 ENV = {"CYBERGUARD_PROJECT_SLUG": "svc-proj", "CYBERGUARD_MASTER_KEY": SECRET}
 
 
@@ -22,18 +22,29 @@ def client_and_store(tmp_path):
     config = load_config(ENV)
     store = ResponseStore(tmp_path / "responses.db")
     shipper = GatewayShipper(
-        config, store,
+        config,
+        store,
         client=httpx.Client(
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(
-                    200, json={"event_id": f"evt-{time.time_ns()}", "risk_score": 90, "severity": "critical"}
+                    200,
+                    json={
+                        "event_id": f"evt-{time.time_ns()}",
+                        "risk_score": 90,
+                        "severity": "critical",
+                    },
                 )
             ),
             timeout=5,
         ),
         sleeper=lambda _s: None,
     )
-    app = create_app(config, store=store, shipper=shipper, book=ScenarioBook(rng=__import__("random").Random(7)))
+    app = create_app(
+        config,
+        store=store,
+        shipper=shipper,
+        book=ScenarioBook(rng=__import__("random").Random(7)),
+    )
     yield TestClient(app), store
     shipper.close()
 
@@ -58,7 +69,9 @@ def test_health_and_responses(client_and_store):
 
 def test_traffic_start_status_stop_lifecycle(client_and_store):
     client, _store = client_and_store
-    r = client.post("/traffic/start", json={"rate": 600, "duration": 0.02, "mix": "net=100"})
+    r = client.post(
+        "/traffic/start", json={"rate": 600, "duration": 0.02, "mix": "net=100"}
+    )
     assert r.status_code == 200
     job_id = r.json()["job_id"]
     assert r.json()["state"] == "running"
@@ -88,7 +101,9 @@ def test_traffic_start_status_stop_lifecycle(client_and_store):
 
 def test_traffic_stop_interrupts_run(client_and_store):
     client, _store = client_and_store
-    r = client.post("/traffic/start", json={"rate": 60, "duration": 10, "mix": "benign=100"})
+    r = client.post(
+        "/traffic/start", json={"rate": 60, "duration": 10, "mix": "benign=100"}
+    )
     job_id = r.json()["job_id"]
     time.sleep(0.8)  # a few ships at ~1s interval
     r = client.post("/traffic/stop", json={"job_id": job_id})
@@ -111,10 +126,20 @@ def test_traffic_stop_interrupts_run(client_and_store):
 
 def test_metrics_and_replay_endpoints(client_and_store):
     client, store = client_and_store
-    store.append("analyze_network", {"action": "analyze_network", "data": {"flows": [{}]}},
-                 "200", {"event_id": "old-1", "severity": "critical"}, 12)
-    store.append("analyze_ato", {"action": "analyze_ato", "data": {"events": [{}]}},
-                 "200", {"event_id": "old-2", "severity": "high"}, 22)
+    store.append(
+        "analyze_network",
+        {"action": "analyze_network", "data": {"flows": [{}]}},
+        "200",
+        {"event_id": "old-1", "severity": "critical"},
+        12,
+    )
+    store.append(
+        "analyze_ato",
+        {"action": "analyze_ato", "data": {"events": [{}]}},
+        "200",
+        {"event_id": "old-2", "severity": "high"},
+        22,
+    )
 
     m = client.get("/traffic/metrics").json()
     assert m["total"] == 2
@@ -123,15 +148,22 @@ def test_metrics_and_replay_endpoints(client_and_store):
     assert m["latency_ms"]["p50"] == 12.0
     assert m["success_rate"] == 1.0
 
-    r = client.post("/traffic/replay", json={"from_ts": "2000-01-01T00:00", "to_ts": "2100-01-01T00:00"})
+    r = client.post(
+        "/traffic/replay",
+        json={"from_ts": "2000-01-01T00:00", "to_ts": "2100-01-01T00:00"},
+    )
     assert r.status_code == 200
     stats = r.json()
     assert stats["replayed"] == 2
     assert stats["succeeded"] == 2
     assert stats["old_event_ids"] == ["old-1", "old-2"]
-    assert all(new != old for old, new in zip(stats["old_event_ids"], stats["new_event_ids"]))
+    assert all(
+        new != old for old, new in zip(stats["old_event_ids"], stats["new_event_ids"])
+    )
 
     # invalid window -> 400
-    r = client.post("/traffic/replay", json={"from_ts": "2100-01-01", "to_ts": "2000-01-01"})
+    r = client.post(
+        "/traffic/replay", json={"from_ts": "2100-01-01", "to_ts": "2000-01-01"}
+    )
     assert r.status_code == 400
     assert "after to_ts" in r.json()["detail"]

@@ -8,7 +8,7 @@ gateway issues a NEW event_id.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .shipper import GatewayShipper
@@ -27,7 +27,7 @@ def normalize_ts(raw: str, boundary: str) -> str:
     text = raw.strip().replace("T", " ")
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            parsed = datetime.strptime(text, fmt)
+            parsed = datetime.strptime(text, fmt)  # noqa: DTZ007
             return parsed.strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             continue
@@ -38,7 +38,7 @@ def normalize_ts(raw: str, boundary: str) -> str:
             f"replay {boundary} timestamp {raw!r} is not ISO (e.g. 2026-09-26T00:00)"
         ) from exc
     if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
     return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -104,4 +104,4 @@ def _loads(raw: Any) -> Any:
 
 def utc_now_store_ts() -> str:
     """Current UTC time in the store's ts format (for 'replay last N s')."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")

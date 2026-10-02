@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import UTC, datetime
 
 from .scenarios import ScenarioBook, Template
 from .shipper import GatewayShipper, ShipResult
@@ -55,7 +55,7 @@ class TrafficSummary:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def generate(
@@ -89,8 +89,6 @@ def generate(
     if total_weight <= 0:
         raise ValueError("mix weights must sum to > 0")
 
-    import random
-
     rng = book.rng
     stop_event = stop_event or threading.Event()
     summary = TrafficSummary(started_at=_now_iso())
@@ -118,8 +116,12 @@ def generate(
         result = shipper.ship(template.action, template.data)
 
         summary.events_shipped += 1
-        summary.by_action[template.action] = summary.by_action.get(template.action, 0) + 1
-        summary.by_category[template.category] = summary.by_category.get(template.category, 0) + 1
+        summary.by_action[template.action] = (
+            summary.by_action.get(template.action, 0) + 1
+        )
+        summary.by_category[template.category] = (
+            summary.by_category.get(template.category, 0) + 1
+        )
         if result.ok:
             summary.succeeded += 1
         else:

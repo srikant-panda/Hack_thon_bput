@@ -86,7 +86,11 @@ def _compute_locked(conn: sqlite3.Connection, window_minutes: int) -> dict[str, 
             try:
                 import json
 
-                sev = str((json.loads(resp_json) or {}).get("severity", "")).strip().lower()
+                sev = (
+                    str((json.loads(resp_json) or {}).get("severity", ""))
+                    .strip()
+                    .lower()
+                )
             except (ValueError, AttributeError):
                 continue
             if sev:
@@ -118,5 +122,7 @@ def _percentile(sorted_values: list[int], pct: int) -> float | None:
     """Nearest-rank percentile over an already-sorted list."""
     if not sorted_values:
         return None
-    idx = max(0, min(len(sorted_values) - 1, (len(sorted_values) * pct + 99) // 100 - 1))
+    idx = max(
+        0, min(len(sorted_values) - 1, (len(sorted_values) * pct + 99) // 100 - 1)
+    )
     return float(sorted_values[idx])

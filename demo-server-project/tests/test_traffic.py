@@ -2,6 +2,7 @@
 graceful stop. All offline: fake sleeper/clock + recording shipper."""
 
 import threading
+from typing import ClassVar
 
 from demo_server.scenarios import ScenarioBook
 from demo_server.traffic import generate
@@ -38,7 +39,7 @@ class FakeClock:
         self.t += s
         self.delays.append(s)
 
-    delays: list = []
+    delays: ClassVar[list] = []
 
 
 def make_book():
@@ -49,9 +50,14 @@ def test_generate_rate_and_duration_honored():
     shipper = RecordingShipper()
     clock = FakeClock()
     summary = generate(
-        shipper, make_book(), {"net": 100},
-        rate_per_min=600, duration_min=0.1, jitter=0.2,
-        sleeper=clock.sleep, now_fn=clock.now,
+        shipper,
+        make_book(),
+        {"net": 100},
+        rate_per_min=600,
+        duration_min=0.1,
+        jitter=0.2,
+        sleeper=clock.sleep,
+        now_fn=clock.now,
     )
     assert summary.events_shipped == 60  # 600/min * 0.1 min
     assert len(shipper.calls) == 60
@@ -67,9 +73,14 @@ def test_generate_mix_distribution():
     shipper = RecordingShipper()
     clock = FakeClock()
     summary = generate(
-        shipper, make_book(), {"net": 50, "benign": 50},
-        rate_per_min=6000, duration_min=0.05, jitter=0.0,  # 300 ships
-        sleeper=clock.sleep, now_fn=clock.now,
+        shipper,
+        make_book(),
+        {"net": 50, "benign": 50},
+        rate_per_min=6000,
+        duration_min=0.05,
+        jitter=0.0,  # 300 ships
+        sleeper=clock.sleep,
+        now_fn=clock.now,
     )
     assert summary.events_shipped == 300
     net = summary.by_category["net_critical"]
@@ -91,9 +102,15 @@ def test_generate_graceful_stop_completes_current_send():
             stop_event.set()
 
     summary = generate(
-        shipper, make_book(), {"ato": 100},
-        rate_per_min=60, duration_min=10, jitter=0.0,
-        stop_event=stop_event, sleeper=clock.sleep, now_fn=clock.now,
+        shipper,
+        make_book(),
+        {"ato": 100},
+        rate_per_min=60,
+        duration_min=10,
+        jitter=0.0,
+        stop_event=stop_event,
+        sleeper=clock.sleep,
+        now_fn=clock.now,
         on_ship=stop_after_5,
     )
     assert summary.events_shipped == 5
@@ -111,6 +128,8 @@ def test_generate_validates_inputs():
     with pytest.raises(ValueError, match="duration_min"):
         generate(shipper, book, {"net": 100}, rate_per_min=60, duration_min=-1)
     with pytest.raises(ValueError, match="jitter"):
-        generate(shipper, book, {"net": 100}, rate_per_min=60, duration_min=1, jitter=1.0)
+        generate(
+            shipper, book, {"net": 100}, rate_per_min=60, duration_min=1, jitter=1.0
+        )
     with pytest.raises(ValueError, match="mix"):
         generate(shipper, book, {}, rate_per_min=60, duration_min=1)

@@ -1,0 +1,102 @@
+{
+  "name": "exfil_spike",
+  "description": "Multi-stage attack lifecycle: C2 backdoor reconnaissance, 22MB+ exfiltration spike, and API abuse flood",
+  "default_attacker_ip": "198.51.100.99",
+  "stages": [
+    {
+      "name": "stage1_backdoor_probe",
+      "action": "analyze_network",
+      "expected_severity": "critical",
+      "delay_s": 0.5,
+      "description": "C2 backdoor probe on suspicious port 4444",
+      "payload": {
+        "flows": [
+          {"source_ip": "10.0.1.10", "dest_ip": "{attacker_ip}", "port": 4444, "bytes_out": 4096, "protocol": "TCP", "duration_s": 120}
+        ]
+      }
+    },
+    {
+      "name": "stage2_volume_exfiltration",
+      "action": "analyze_network",
+      "expected_severity": "high",
+      "delay_s": 1.0,
+      "description": "Massive outbound data exfiltration spike (22.5 MB, threshold 10 MB)",
+      "payload": {
+        "flows": [
+          {"source_ip": "10.0.2.20", "dest_ip": "{attacker_ip}", "port": 8443, "bytes_out": 22500000, "protocol": "TCP", "duration_s": 600}
+        ]
+      }
+    },
+    {
+      "name": "stage3_api_rate_flood",
+      "action": "analyze_network",
+      "expected_severity": "high",
+      "delay_s": 0.5,
+      "description": "Automated API rate abuse burst (82 req/min, threshold 50)",
+      "payload": {
+        "api_logs": [
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200},
+          {"source_ip": "{attacker_ip}", "endpoint": "/api/v1/telemetry", "status": 200}
+        ]
+      }
+    }
+  ]
+}
