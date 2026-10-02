@@ -21,7 +21,7 @@ def compute(
 ) -> dict[str, Any]:
     """Metrics over the last `window_minutes`, straight from the store.
     Holds the store lock for the whole snapshot so aggregates are consistent
-    while the traffic generator appends concurrently."""
+    while the simulated-traffic worker appends concurrently."""
     with store.lock:
         return _compute_locked(store._conn, window_minutes)
 

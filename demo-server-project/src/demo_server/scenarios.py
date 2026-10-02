@@ -1,4 +1,4 @@
-"""Scenario template loader for the traffic generator.
+"""Scenario template loader for the simulated traffic stream.
 
 scenarios/ holds JSON files per category, each a list of templates:
     {"action": "analyze_network", "data": {...},

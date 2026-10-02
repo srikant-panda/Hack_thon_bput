@@ -1,8 +1,9 @@
 """FastAPI service (port 8020): traffic control, metrics, replay, store API.
 
 App factory takes optional config/store/shipper so tests can inject a
-MockTransport-backed shipper. The traffic generator runs in a background
-thread with cooperative stop (threading.Event), so POST /traffic/stop is
+MockTransport-backed shipper. The simulated-traffic worker runs in a
+background thread with cooperative stop (threading.Event), so
+POST /traffic/stop is
 graceful: the current send completes, no new sends are scheduled.
 """
 

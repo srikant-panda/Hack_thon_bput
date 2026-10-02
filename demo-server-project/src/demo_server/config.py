@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     ship_timeout_s: int = Field(default=10, validation_alias="SHIP_TIMEOUT_S")
     ship_max_retries: int = Field(default=3, validation_alias="SHIP_MAX_RETRIES")
 
-    # --- Traffic generator defaults ---
+    # --- Simulated traffic defaults ---
     default_rate: float = Field(default=10.0, validation_alias="DEFAULT_RATE")
     default_duration: float = Field(default=60.0, validation_alias="DEFAULT_DURATION")
 

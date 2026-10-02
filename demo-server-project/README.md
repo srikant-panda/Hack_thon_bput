@@ -1,24 +1,25 @@
-# Demo Server — Production-grade CyberGuard Traffic Generator & Campaign Simulator
+# Demo Server — Client App Simulator for the CyberGuard Security API
 
-Standalone tool that generates realistic security-event traffic and replays
-multi-stage attack campaigns against the [CyberGuard](../README.md) project
-gateway (`POST /api/v1/p/{slug}/gateway`). It is the load-and-demo arm of
-CyberGuard: everything it ships flows through the real analysis pipeline and
-lands in the org dashboard as events, alerts, and closed-loop
-auto-enforcement.
+This tool simulates an external Client App (like an e-commerce backend or
+SaaS platform) integrating with the [CyberGuard](../README.md) Security API
+gateway (`POST /api/v1/p/{slug}/gateway`). It forwards realistic user-event
+traffic and replays multi-stage simulated traffic campaigns through the
+gateway — the load-and-demo arm of CyberGuard: everything it sends flows
+through the real analysis pipeline and lands in the org dashboard as
+events, alerts, and closed-loop auto-enforcement.
 
 Zero CyberGuard backend/frontend imports — it consumes the gateway exactly
-like an external integration would, over Bearer-key auth. Built on
+like a real third-party integration would, over Bearer-key auth. Built on
 pydantic-settings (strict env/`.env` configuration) and a Typer CLI, in a
 `src/`-layout package.
 
 ## Features
 
-- **Realistic attack campaigns** — four built-in multi-stage campaigns
-  (credential stuffing, C2 beacon waves, exfiltration spikes, full APT
-  lifecycle) using verified trigger rules from the analyzers.
+- **Realistic simulated-traffic campaigns** — four built-in multi-stage
+  campaigns (credential stuffing, C2 beacon waves, exfiltration spikes,
+  full APT lifecycle) using verified trigger rules from the analyzers.
 - **Time-aware payloads** — stage delays with `--timescale` acceleration,
-  attacker-IP parameterization, jittered continuous traffic generation.
+  simulated source-IP parameterization, jittered continuous traffic.
 - **Gateway integration** — Bearer master-key auth, exponential-backoff
   retries on 5xx/transport errors only (4xx never retried), strict
   env/`.env` configuration with fail-fast startup errors.
@@ -114,7 +115,7 @@ uv run demo-server campaign report --limit 10
   matched indicator). A JSON run report is written to `REPORTS_DIR`.
 - `campaign report` — recent gateway calls from the store with severity,
   verdict, and blocked-indicator match columns.
-- `--attacker-ip` overrides the attacker IP in every stage payload;
+- `--attacker-ip` overrides the simulated source IP in every stage payload;
   without it each campaign uses its `default_attacker_ip`.
 
 ## Available Campaigns
@@ -124,7 +125,7 @@ Built-in definitions live in [`campaigns/`](campaigns/) as validated JSON.
 | Campaign | Stages | What it tests |
 |---|---|---|
 | `cred_stuffing` | 3 | Failed-login burst (brute-force trigger), Berlin→Sydney impossible travel (T1078), success-after-failures stuffing — exercises the account-takeover analyzer end to end. |
-| `c2_beacon_wave` | 3 | Command-and-control beacons on ports 4444 / 8888 / 1337 with a parameterized attacker IP — exercises suspicious-port detection and indicator registration/blocking. |
+| `c2_beacon_wave` | 3 | Command-and-control beacons on ports 4444 / 8888 / 1337 with a parameterized source IP — exercises suspicious-port detection and indicator registration/blocking. |
 | `exfil_spike` | 3 | C2 backdoor probe, 22.5 MB exfiltration spike (threshold 10 MB), API rate-abuse flood (threshold 50 req/min) — exercises the network analyzer's volume and rate rules. |
 | `apt_mixed` | 5 | Full APT lifecycle across both analyzers: brute-force initial access, impossible-travel persistence, C2 implantation, mass exfiltration, API-flood cover traffic. |
 

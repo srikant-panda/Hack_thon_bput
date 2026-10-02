@@ -2,7 +2,7 @@
 
 import pytest
 
-from demo_server.config import ConfigError, load_config
+from demo_server.config import ConfigError, Settings, load_config
 
 BASE = {
     "CYBERGUARD_PROJECT_SLUG": "demo",
@@ -32,10 +32,19 @@ SETTING_VARS = [
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, tmp_path):
     """Isolate os.environ for the env=None paths and keep cwd out of the repo
-    so a developer's real .env can never leak into these tests."""
+    so a developer's real .env can never leak into these tests.
+
+    chdir alone is not enough: Settings.env_file also includes the absolute
+    project-root .env, so point it at the tmp dir instead (tests that write
+    a cwd .env still work — same file, resolved from tmp_path)."""
     for var in SETTING_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        Settings,
+        "model_config",
+        {**Settings.model_config, "env_file": (tmp_path / ".env",)},
+    )
 
 
 def test_defaults_applied():

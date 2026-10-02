@@ -1,10 +1,11 @@
-"""Attack Campaign runner and reporting (SIM-1, JSON-driven).
+"""Simulated client-traffic campaign runner and reporting (SIM-1, JSON-driven).
 
 Campaign definitions live as validated JSON files in the configured
 campaigns directory (`CAMPAIGNS_DIR`, default `./campaigns`, falling back
-to the project root). Each file describes one campaign; `{attacker_ip}`
-placeholders inside stage payloads are substituted at build time with the
-`--attacker-ip` override or the campaign's `default_attacker_ip`.
+to the project root). Each file describes one simulated traffic sequence;
+`{attacker_ip}` placeholders inside stage payloads are substituted at build
+time with the `--attacker-ip` override or the campaign's
+`default_attacker_ip`.
 
 Execution runs each stage in order with timescale-scaled delays against
 the CyberGuard gateway and reports stage-by-stage severity matches and
@@ -36,7 +37,7 @@ ALLOWED_ACTIONS = frozenset(
 )
 ALLOWED_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
-# Placeholder replaced with the attacker IP in stage payloads.
+# Placeholder replaced with the simulated source IP in stage payloads.
 ATTACKER_IP_TOKEN = "{attacker_ip}"
 
 
@@ -320,6 +321,10 @@ def run_campaign(
 
         t_stage = time.monotonic()
         payload = stage.build_payload(attacker_ip)
+        print(
+            f"Forwarding client event to CyberGuard API... "
+            f"stage '{stage.name}' (action={stage.action})"
+        )
         ship_res = shipper.ship(stage.action, payload)
         stage_lat_ms = int((time.monotonic() - t_stage) * 1000)
 
@@ -337,6 +342,10 @@ def run_campaign(
             )
             if blocked_matched or verdict == "blocked_permanently":
                 auto_blocked_count += 1
+                print(
+                    "CyberGuard API returned verdict: BLOCK. "
+                    "Client app will deny access."
+                )
 
         res = StageResult(
             stage_name=stage.name,
@@ -462,10 +471,10 @@ def format_campaign_table(summary: CampaignSummary) -> str:
     lines.append("")
     lines.append(f"Campaign      : {summary.campaign_name}")
     if summary.attacker_ip:
-        lines.append(f"Attacker IP   : {summary.attacker_ip}")
+        lines.append(f"Simulated IP  : {summary.attacker_ip}")
     lines.append(f"Timescale     : {summary.timescale}")
     lines.append(
-        f"Stages Shipped: {summary.total_stages} (Succeeded: {summary.succeeded}, Failed: {summary.failed})"
+        f"Stages Forwarded: {summary.total_stages} (Succeeded: {summary.succeeded}, Failed: {summary.failed})"
     )
     lines.append(f"Auto-Blocked  : {summary.auto_blocked_count}/{summary.total_stages}")
     lines.append(f"Elapsed Time  : {summary.elapsed_s:.2f}s")
@@ -475,7 +484,8 @@ def format_campaign_table(summary: CampaignSummary) -> str:
     lines.append(f"Severity Match: {sev_match}")
     if summary.all_auto_blocked:
         lines.append(
-            "CLOSED-LOOP PROOF: ALL STAGES AUTO-BLOCKED BY REGISTERED INDICATOR"
+            "CLOSED-LOOP PROOF: CyberGuard API returned verdict: BLOCK. "
+            "Client app will deny access."
         )
 
     return "\n".join(lines)

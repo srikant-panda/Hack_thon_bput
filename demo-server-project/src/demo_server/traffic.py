@@ -1,4 +1,4 @@
-"""Continuous traffic generator.
+"""Continuous simulated traffic (client app event stream).
 
 Ships scenario payloads at a configurable rate with jitter via the B1
 shipper (which stores every attempt). Runs as a blocking loop suitable for

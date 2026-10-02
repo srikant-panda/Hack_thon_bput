@@ -35,11 +35,11 @@ from .shipper import GatewayShipper, ShipResult
 from .store import ResponseStore
 
 app = typer.Typer(
-    help="CyberGuard gateway demo client: traffic generation, campaigns, reporting.",
+    help="Client App Simulator for CyberGuard Security API.",
     no_args_is_help=True,
 )
 campaign_app = typer.Typer(
-    help="Execute and report multi-stage attack campaigns.",
+    help="Simulate client app traffic: run multi-stage campaigns and report gateway verdicts.",
     no_args_is_help=True,
 )
 app.add_typer(campaign_app, name="campaign")
@@ -293,13 +293,16 @@ def campaign_run(
         ),
     ] = None,
     attacker_ip: Annotated[
-        str | None, typer.Option("--attacker-ip", help="attacker IP override")
+        str | None,
+        typer.Option("--attacker-ip", help="simulated source IP override"),
     ] = None,
 ) -> int:
-    """Run an attack campaign with stage progression and verdict assertions.
+    """Simulate client app traffic forwarding user events to the gateway.
 
-    A JSON summary of the run is persisted under `Settings.reports_dir`
-    (REPORTS_DIR) so demo evidence survives the terminal session.
+    Stages progress with delays and verdict assertions validate the API's
+    responses. A JSON summary of the run is persisted under
+    `Settings.reports_dir` (REPORTS_DIR) so demo evidence survives the
+    terminal session.
     """
     config, _store, shipper = build_components()
     try:
@@ -383,7 +386,7 @@ def campaign_report(
 
 @campaign_app.command("list")
 def campaign_list() -> int:
-    """List all available attack campaigns and stages.
+    """List all available simulated traffic campaigns and stages.
 
     Works without a configured key — it only reads the campaigns directory.
     """
@@ -393,7 +396,7 @@ def campaign_list() -> int:
         print(f"campaign error: {exc}", file=sys.stderr)
         return 2
 
-    print("Available Attack Campaigns:\n")
+    print("Available Simulated Traffic Campaigns:\n")
     for name, camp in sorted(campaigns.items()):
         print(f"  • {name}: {camp.description}")
         print(f"    Stages ({len(camp.stages)}):")
