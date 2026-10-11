@@ -417,7 +417,9 @@ class GmailProvider:
             raise
 
     async def create_sender_rule(self, access_token: str, sender_email: str, target_label: str) -> dict:
-        """Create a Gmail filter auto-quarantining future mail from the sender.
+        """Create a Gmail filter that ACTUALLY BLOCKS the sender: future mail
+        from the address is sent straight to TRASH on arrival (removed from
+        the inbox, kept in the blocked label for traceability).
 
         Requires https://www.googleapis.com/auth/gmail.settings.basic; without
         the granted scope Google answers 403 which maps to insufficient_scope.
@@ -428,7 +430,10 @@ class GmailProvider:
             access_token,
             json={
                 "criteria": {"from": sender_email},
-                "action": {"addLabelIds": [target_label], "removeLabelIds": ["INBOX"]},
+                "action": {
+                    "addLabelIds": [target_label, "TRASH"],
+                    "removeLabelIds": ["INBOX"],
+                },
             },
         )
 

@@ -22,11 +22,24 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.db.admin import _get_admin_session_maker
-from app.db.models import BlockedSender, ConnectorOperationLog, QuarantinedItem
+from email.utils import parseaddr
+
+from sqlalchemy import select
+
+from app.db.models import (
+    BlockedSender,
+    ConnectorOperationLog,
+    EmailConnectorAccount,
+    QuarantinedItem,
+    SecurityEvent,
+)
 from app.services.email_providers import get_provider
 from app.services.email_providers.base import EmailProviderError
+from app.services.action_engine import enforce_scan_results
 from app.services.connectors.token_manager import TokenRefreshError, get_valid_access_token
+from app.services.mail_scanner import scan_message
 from app.services.security_history_service import record_event
+from app.services.trusted_senders import annotate_scan_with_trust, is_sender_trusted
 
 logger = logging.getLogger("cyberguard.scheduler")
 
@@ -157,6 +170,19 @@ async def run_expiry_once() -> dict:
                 stats["blocks_expired"] += 1
             except (EmailProviderError, TokenRefreshError, RuntimeError) as exc:
                 block.last_error = f"{type(exc).__name__}: {getattr(exc, 'message', exc)}"
+                # Permanently unrecoverable states (rotated CONNECTOR_TOKEN_KEY,
+                # missing refresh token): mark the connector reauth_required so
+                # the UI shows "reconnect needed" and this pass stops retrying
+                # the same dead row every cycle.
+                unrecoverable = (
+                    (isinstance(exc, RuntimeError) and "cannot be decrypted" in str(exc))
+                    or (isinstance(exc, TokenRefreshError) and exc.error_class == "reauth_required")
+                )
+                if unrecoverable:
+                    connector_row = await db.get(EmailConnectorAccount, block.connector_id)
+                    if connector_row is not None:
+                        connector_row.status = "reauth_required"
+                        connector_row.last_error = block.last_error
                 await db.commit()
                 stats["failures"] += 1
                 logger.warning("Block expiry failed for %s: %s", block.id, block.last_error)
@@ -164,6 +190,131 @@ async def run_expiry_once() -> dict:
     if any(stats.values()):
         logger.info("Expiry scheduler pass: %s", stats)
     return stats
+
+
+AUTO_SCAN_INTERVAL_SECONDS = 120
+
+
+async def run_auto_scan_once() -> dict:
+    """Auto-scan pass (FP/demo hardening): the backend now notices NEW mail
+    without a manual scan click. Every connected personal mailbox is polled;
+    messages already analyzed (a scan_verdict security event exists for the
+    provider_message_id) are skipped, so each new email is scanned exactly
+    once, shortly after arrival. Enforcement reuses the production action
+    engine (corroboration gate + trust list included)."""
+    stats = {"connectors_scanned": 0, "messages_scanned": 0, "failures": 0}
+    session_maker = _get_admin_session_maker()
+    async with session_maker() as db:
+        conn_ids = (
+            await db.execute(
+                select(EmailConnectorAccount.id).where(
+                    EmailConnectorAccount.status == "connected"
+                )
+            )
+        ).scalars().all()
+
+    for conn_id in conn_ids:
+        # One session per connector: a rollback after a mailbox failure must
+        # not expire the ORM objects used by later iterations (AsyncSession
+        # forbids implicit lazy loads — the classic MissingGreenlet trap).
+        async with session_maker() as db:
+            try:
+                connector = await db.get(EmailConnectorAccount, conn_id)
+                if connector is None or connector.status != "connected":
+                    continue
+                if not connector.refresh_token_enc:
+                    # Without a refresh token the mailbox can never be polled
+                    # again — retire it instead of warning every pass.
+                    connector.status = "reauth_required"
+                    connector.last_error = "No refresh token stored — reconnect this mailbox."
+                    await db.commit()
+                    logger.info("Auto-scan: connector %s marked reauth_required (no refresh token)", conn_id)
+                    continue
+                try:
+                    token = await get_valid_access_token(connector, db)
+                except RuntimeError as exc:
+                    if "cannot be decrypted" in str(exc):
+                        # CONNECTOR_TOKEN_KEY rotated — permanently unrecoverable.
+                        connector.status = "reauth_required"
+                        connector.last_error = str(exc)
+                        await db.commit()
+                        logger.info("Auto-scan: connector %s marked reauth_required (undecryptable token)", conn_id)
+                        continue
+                    raise
+                provider = get_provider(connector.provider)
+                caps = provider.capabilities or {}
+                if isinstance(caps, dict) and not caps.get("supports_read", True):
+                    continue
+                entries = await provider.list_messages(token, max_results=10)
+                message_ids = [e["id"] for e in entries]
+                if not message_ids:
+                    continue
+                already = set(
+                    (
+                        await db.execute(
+                            select(SecurityEvent.provider_message_id).where(
+                                SecurityEvent.owner_user_id == connector.owner_user_id,
+                                SecurityEvent.event_type == "scan_verdict",
+                                SecurityEvent.provider_message_id.in_(message_ids),
+                            )
+                        )
+                    ).scalars().all()
+                )
+                fresh_ids = [mid for mid in message_ids if mid not in already]
+                if not fresh_ids:
+                    continue
+                pairs = []
+                for mid in fresh_ids:
+                    message = await provider.get_message(token, mid)
+                    scan = await scan_message(message)
+                    if await is_sender_trusted(db, connector.owner_user_id, _sender_of(message)):
+                        scan = annotate_scan_with_trust(scan)
+                    pairs.append((message, scan))
+                    await record_event(
+                        db,
+                        owner_user_id=connector.owner_user_id,
+                        event_type="scan_verdict",
+                        actor_type="system",
+                        connector=connector,
+                        provider_message_id=message.provider_message_id,
+                        sender_email=message.sender,
+                        subject=message.subject,
+                        severity=scan.overall_severity,
+                        score=scan.overall_score,
+                        explanation=scan.overall_explanation,
+                        action_requested=scan.recommended_action,
+                        operation_status="success",
+                        operation_detail="auto-scan (scheduler)",
+                    )
+                results = await enforce_scan_results(db, connector, pairs)
+                stats["connectors_scanned"] += 1
+                stats["messages_scanned"] += len(results)
+                await db.commit()
+                logger.info(
+                    "Auto-scan %s: %d new message(s) analyzed for %s",
+                    connector.provider, len(results), connector.provider_email,
+                )
+            except Exception as exc:  # noqa: BLE001 - one mailbox must not stall the rest
+                stats["failures"] += 1
+                logger.warning("Auto-scan failed for connector %s: %s", conn_id, exc)
+                await db.rollback()
+    if stats["connectors_scanned"] or stats["failures"]:
+        logger.info("Auto-scan pass: %s", stats)
+    return stats
+
+
+def _sender_of(message) -> str:
+    _, addr = parseaddr(message.sender or "")
+    return (addr or message.sender or "").strip().lower()
+
+
+async def _auto_scan_loop() -> None:
+    while True:
+        try:
+            await run_auto_scan_once()
+        except Exception:  # noqa: BLE001 - the scheduler must never crash the loop
+            logger.exception("Auto-scan pass failed")
+        await asyncio.sleep(AUTO_SCAN_INTERVAL_SECONDS)
 
 
 async def _loop() -> None:
@@ -175,16 +326,25 @@ async def _loop() -> None:
         await asyncio.sleep(INTERVAL_SECONDS)
 
 
+_running_task: asyncio.Task | None = None
+_auto_scan_task: asyncio.Task | None = None
+
+
 def start_scheduler() -> None:
-    global _running_task
+    global _running_task, _auto_scan_task
     if _running_task is None or _running_task.done():
         _running_task = asyncio.create_task(_loop())
         logger.info("Expiry scheduler started (interval %ss)", INTERVAL_SECONDS)
+    if _auto_scan_task is None or _auto_scan_task.done():
+        _auto_scan_task = asyncio.create_task(_auto_scan_loop())
+        logger.info("Auto-scan scheduler started (interval %ss)", AUTO_SCAN_INTERVAL_SECONDS)
 
 
 def stop_scheduler() -> None:
-    global _running_task
-    if _running_task is not None:
-        _running_task.cancel()
-        _running_task = None
-        logger.info("Expiry scheduler stopped")
+    global _running_task, _auto_scan_task
+    for name, task_var in (("Expiry scheduler", "_running_task"), ("Auto-scan scheduler", "_auto_scan_task")):
+        task = globals().get(task_var)
+        if task is not None:
+            task.cancel()
+            globals()[task_var] = None
+            logger.info(f"{name} stopped")

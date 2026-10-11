@@ -471,6 +471,8 @@ export interface ScanResult {
   provider: string;
   sender: string;
   subject: string;
+  /** Stored with quarantined items so the review drawer renders the body offline. */
+  message_body?: string;
   received_at: string | null;
   overall_severity: string;
   overall_score: number;
@@ -499,6 +501,7 @@ export interface ConnectorSettings {
 export interface QuarantinedItem {
   id: string;
   connector_id: string;
+  provider?: string | null;
   provider_message_id: string;
   sender_email: string;
   reason: string;
@@ -513,6 +516,7 @@ export interface QuarantinedItem {
 export interface BlockedSender {
   id: string;
   connector_id: string;
+  provider?: string | null;
   sender_email: string;
   provider_rule_id: string | null;
   reason: string;
