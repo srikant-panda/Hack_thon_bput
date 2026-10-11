@@ -41,11 +41,34 @@ BRAND_NAMES = (
     "whatsapp",
     "telegram",
     "notion",
+    "cloudflare",
 )
 
 SUSPICIOUS_TLDS = {"xyz", "top", "zip", "click", "link", "work", "loan", "cam", "rest", "tk", "ml", "ga", "cf", "gq"}
 
-SUSPICIOUS_PATH_KEYWORDS = ("login", "verify", "secure", "signin", "sign-in", "update", "account")
+SUSPICIOUS_PATH_KEYWORDS = (
+    "login",
+    "verify",
+    "secure",
+    "signin",
+    "sign-in",
+    "update",
+    "account",
+    "password",
+    "reset",
+    "recover",
+    "credential",
+    "auth",
+    "sso",
+    "confirm",
+    "wallet",
+    "unlock",
+    "restore",
+    "mailbox",
+    "billing",
+    "oauth",
+    "payment",
+)
 
 MAX_NORMAL_URL_LENGTH = 75
 ENTROPY_THRESHOLD = 4.0
@@ -81,6 +104,7 @@ AUTHENTIC_MAJOR_DOMAINS = {
     "paypal.com", "stripe.com",
     "slack.com", "zoom.us", "dropbox.com",
     "openai.com", "chatgpt.com",
+    "cloudflare.com",
 }
 
 
@@ -396,6 +420,106 @@ def _check_urlhaus_pattern(host: str, path: str) -> list[dict]:
     return []
 
 
+CRITICAL_IDENTITY_PATTERNS = (
+    "sso",
+    "identity-validation",
+    "protection-center",
+    "password-reset",
+    "mail-admin",
+    "document-share",
+    "oauth-session",
+    "cloud-drive",
+    "account-protection",
+    "bank-account",
+    "wallet-recovery",
+    "account-locked",
+    "vpn-auth",
+    "payment-confirmation",
+    "banking-auth",
+)
+
+GENERIC_LURE_WORDS = {
+    "account",
+    "signin",
+    "login",
+    "verify",
+    "secure",
+    "security",
+    "identity",
+    "payment",
+    "billing",
+    "session",
+    "update",
+    "profile",
+    "confirm",
+    "mailbox",
+    "support",
+    "customer",
+    "center",
+    "portal",
+    "alert",
+    "notice",
+    "storage",
+    "check",
+    "review",
+    "user",
+    "service",
+    "cloud",
+    "help",
+}
+
+
+def _check_credential_lure_domain(host: str, is_authentic: bool = False) -> list[dict]:
+    if is_authentic or not host:
+        return []
+    from app.core.url_reputation import get_registrable_domain
+    reg = get_registrable_domain(host)
+    sld = reg.split(".")[0] if "." in reg else host
+    for pat in CRITICAL_IDENTITY_PATTERNS:
+        if pat in sld or pat in host:
+            return [
+                {
+                    "type": "credential_harvesting_domain",
+                    "value": host,
+                    "severity": "critical",
+                    "description": f"Domain uses enterprise identity or account credential lure pattern '{pat}' on an unverified domain.",
+                }
+            ]
+    parts = sld.split("-")
+    matches = [p for p in parts if p in GENERIC_LURE_WORDS]
+    if len(matches) >= 2 or (len(parts) == 1 and sld in GENERIC_LURE_WORDS):
+        return [
+            {
+                "type": "generic_credential_lure_domain",
+                "value": host,
+                "severity": "medium",
+                "description": f"Domain uses generic account/credential lure patterns ({sld}).",
+            }
+        ]
+    return []
+
+
+def _check_subdomain_entropy(host: str, is_authentic: bool = False) -> list[dict]:
+    if is_authentic or not host:
+        return []
+    labels = [p for p in host.split(".") if p]
+    if len(labels) >= 3:
+        for part in labels[:-2]:
+            if len(part) >= 16 and _shannon_entropy(part) >= 3.2:
+                return [
+                    {
+                        "type": "random_subdomain_entropy",
+                        "value": part,
+                        "severity": "high",
+                        "description": (
+                            f"Subdomain label '{part}' exhibits high character entropy "
+                            f"({_shannon_entropy(part):.2f}), typical of DGA or fast-flux phishing."
+                        ),
+                    }
+                ]
+    return []
+
+
 def is_authentic_host(host: str, is_spoofed: bool = False) -> bool:
     """Verify whether the host belongs to an authentic, high-reputation domain and is not spoofed."""
     if not host or is_spoofed:
@@ -404,6 +528,9 @@ def is_authentic_host(host: str, is_spoofed: bool = False) -> bool:
 
     reg = get_registrable_domain(host)
     if reg in AUTHENTIC_MAJOR_DOMAINS or host in AUTHENTIC_MAJOR_DOMAINS:
+        return True
+    tld = host.rsplit(".", 1)[-1].lower() if "." in host else ""
+    if tld in {"gov", "mil", "edu", "int"}:
         return True
     return is_domain_in_top1m(host)
 
@@ -430,6 +557,8 @@ def analyze_url_heuristics(url: str) -> list[dict]:
     subdomain_brand_inds = _check_brand_in_subdomain(host)
     subdomain_spoof_inds = _check_subdomain_spoofing(host)
     tld_inds = _check_tld(host)
+    lure_inds = _check_credential_lure_domain(host, is_authentic=False)
+    subdomain_entropy_inds = _check_subdomain_entropy(host, is_authentic=False)
 
     spoof_indicators = (
         ip_inds
@@ -438,12 +567,16 @@ def analyze_url_heuristics(url: str) -> list[dict]:
         + subdomain_brand_inds
         + subdomain_spoof_inds
         + tld_inds
+        + [i for i in lure_inds if i.get("severity") == "critical"]
+        + subdomain_entropy_inds
     )
     is_spoofed = bool(spoof_indicators)
-    indicators.extend(spoof_indicators)
 
     # 2. Host reputation & authenticity
     is_authentic = is_authentic_host(host, is_spoofed=is_spoofed)
+    if not is_authentic:
+        indicators.extend(spoof_indicators)
+        indicators.extend([i for i in lure_inds if i.get("severity") != "critical"])
 
     # 3. Scheme check
     indicators.extend(_check_scheme(parsed.scheme, is_authentic=is_authentic))
@@ -463,7 +596,7 @@ def analyze_url_heuristics(url: str) -> list[dict]:
     else:
         from app.services.url_token_classifier import is_domain_clean, analyze_url_structure
 
-        is_clean = not is_spoofed and is_domain_clean(host)
+        is_clean = not is_spoofed and not bool(lure_inds) and is_domain_clean(host)
         structure = analyze_url_structure(url) if is_clean else {}
         has_tokens = structure.get("has_structured_token", False)
 
@@ -482,6 +615,8 @@ def analyze_url_heuristics(url: str) -> list[dict]:
         if is_authentic and not [i for i in indicators if i.get("severity") in ("medium", "high", "critical")]:
             # On authentic domains with zero threat indicators, ML probability reflects safe band
             probability = min(probability, 0.15)
-        indicators.append(ml_indicator(url_model_artifact(), probability))
+        from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+        has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators)
+        indicators.append(ml_indicator(url_model_artifact(), probability, has_strong_evidence=has_strong))
 
     return indicators

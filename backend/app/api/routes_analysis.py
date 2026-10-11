@@ -291,6 +291,19 @@ async def _run_analysis_pipeline(
     # confidence-floor policy (blend_scores_url) so a high model probability
     # cannot be masked by lexically clean URLs.
     _heuristic_score, hybrid_score, _ml_probability = score_with_ml(indicators, policy=module)
+    if module == "url":
+        import urllib.parse
+        from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+        from app.services.url_detector import is_authentic_host
+
+        has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators)
+        parsed_url_str = raw_data.get("normalized_url") or raw_data.get("url") or ""
+        parsed_h = urllib.parse.urlparse(parsed_url_str if "://" in parsed_url_str else f"http://{parsed_url_str}").hostname or ""
+        if is_authentic_host(parsed_h) and not has_strong:
+            hybrid_score = min(hybrid_score, 15)
+        elif not has_strong and hybrid_score > 60:
+            hybrid_score = min(hybrid_score, 60)
+
     hybrid_score = max(int(hybrid_score), int(min_score))
     severity = get_severity(hybrid_score)
 
@@ -612,13 +625,26 @@ async def analyze_url_visual(
     # Stage 1 inline (fast path — heuristics + XGBoost, URL confidence floor).
     indicators = await asyncio.to_thread(analyze_url_heuristics, url)
     heuristic_score, _hybrid, ml_probability = score_with_ml(indicators, policy="url")
+    import urllib.parse
+    from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+    from app.services.url_detector import is_authentic_host
+
+    has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators)
+    parsed_h = urllib.parse.urlparse(url if "://" in url else f"http://{url}").hostname or ""
+    if is_authentic_host(parsed_h) and not has_strong:
+        _hybrid = min(_hybrid, 15)
+    elif not has_strong and _hybrid > 60:
+        _hybrid = min(_hybrid, 60)
+
+    _hybrid = max(int(_hybrid), 0)
+    sev = get_severity(_hybrid)
     stage1_summary = {
         "heuristic_score": heuristic_score,
         "hybrid_score": _hybrid,
         "ml_probability": ml_probability,
-        "severity": get_severity(_hybrid),
+        "severity": sev,
         "model_version": url_model_artifact(),
-        **get_url_decision(get_severity(_hybrid), ml_probability),
+        **get_url_decision(sev, ml_probability, indicators=indicators),
     }
 
     # Domain-TTL cache: a verdict for this registrable domain already exists.
@@ -641,7 +667,7 @@ async def analyze_url_visual(
             "stage1": stage1_summary,
             "stage2": None,
             "fusion": {
-                "decision": "safe" if ml_probability is not None and ml_probability < 0.5 else "warn",
+                "decision": "safe" if (sev in ("safe", "low") or (ml_probability is not None and ml_probability < 0.5)) else "warn",
                 "reasons": [f"Stage-1 probability {ml_probability} below visual-verification threshold"],
             },
             "cache": None,

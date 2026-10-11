@@ -84,12 +84,21 @@ class AttachmentUrlExtractor:
         for url in urls[: self._max_urls]:
             try:
                 indicators = url_engine.analyze_url_heuristics(url)
+                from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+                from app.services.url_detector import is_authentic_host
+                import urllib.parse
+
+                has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators)
+                parsed_h = urllib.parse.urlparse(url if "://" in url else f"http://{url}").hostname or ""
                 risk = calculate_score(indicators)
+                if is_authentic_host(parsed_h) and not has_strong:
+                    risk = min(risk, 15)
+                is_flagged = risk > 20 if (is_authentic_host(parsed_h) and not has_strong) else risk > 0
                 results.append(
                     {
                         "url": url,
                         "existing_risk": risk,
-                        "flagged": risk > 0,
+                        "flagged": is_flagged,
                         "indicator_count": len(indicators),
                     }
                 )

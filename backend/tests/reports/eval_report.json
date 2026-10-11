@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generated_at": "2026-10-09T12:01:02.788687+00:00",
-    "git_tip": "2fdc7da"
+    "generated_at": "2026-10-09T14:42:49.619974+00:00",
+    "git_tip": "31f1e9c"
   },
   "engines": {
     "phishing_text": {
@@ -25,7 +25,7 @@
       "f1": 0.0,
       "auc": NaN,
       "mal_mean": NaN,
-      "ben_mean": 19.0,
+      "ben_mean": 15.0,
       "band_gap": NaN,
       "mw_p": NaN
     },
@@ -36,7 +36,7 @@
       "recall": 1.0,
       "f1": 1.0,
       "auc": NaN,
-      "mal_mean": 96.66666666666667,
+      "mal_mean": 100.0,
       "ben_mean": NaN,
       "band_gap": NaN,
       "mw_p": NaN
@@ -56,7 +56,7 @@
       "rows": 5572,
       "sha256": null,
       "url": "https://raw.githubusercontent.com/justmarkham/DAT8/master/data/sms.tsv",
-      "fetched_at": "2026-10-09T12:01:04.773430+00:00"
+      "fetched_at": "2026-10-09T14:43:35.702931+00:00"
     },
     {
       "name": "sms_spam",
@@ -64,7 +64,7 @@
       "rows": 5572,
       "sha256": null,
       "url": "https://raw.githubusercontent.com/justmarkham/DAT8/master/data/sms.tsv",
-      "fetched_at": "2026-10-09T12:01:07.972735+00:00"
+      "fetched_at": "2026-10-09T14:43:38.083711+00:00"
     }
   ],
   "findings": [

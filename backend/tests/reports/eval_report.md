@@ -1,7 +1,7 @@
 # CYBERGUARD Evaluation Harness Report
 
-- Generated: 2026-10-09T12:01:02.788687+00:00
-- Git tip: 2fdc7da
+- Generated: 2026-10-09T14:42:49.619974+00:00
+- Git tip: 31f1e9c
 - Scale option: default
 - Data mode: auto
 
@@ -10,8 +10,8 @@
 | Engine | Cases | Positives | Precision | Recall | F1 | AUC | Malicious mean | Benign mean | Band gap | MW p-value |
 |---|---|---|---|---|---|---|---|---|---|---|
 | phishing_text | 1100 | 202 | 1.0000 | 0.3663 | 0.5362 | 0.9055 | 37.60 | 2.61 | 34.99 | 0.0000 |
-| marketing_fp_check | 10 | 0 | 0.0000 | 0.0000 | 0.0000 | nan | nan | 19.00 | nan | nan |
-| phishing_auto_enforce_check | 3 | 3 | 1.0000 | 1.0000 | 1.0000 | nan | 96.67 | nan | nan | nan |
+| marketing_fp_check | 10 | 0 | 0.0000 | 0.0000 | 0.0000 | nan | nan | 15.00 | nan | nan |
+| phishing_auto_enforce_check | 3 | 3 | 1.0000 | 1.0000 | 1.0000 | nan | 100.00 | nan | nan | nan |
 
 ## Property tests
 
@@ -25,8 +25,8 @@
 
 | Source | Mode | Rows | SHA256 | Fetched at |
 |---|---|---|---|---|
-| sms_spam | cache | 5572 | —… | 2026-10-09T12:01:04.773430+00:00 |
-| sms_spam | cache | 5572 | —… | 2026-10-09T12:01:07.972735+00:00 |
+| sms_spam | cache | 5572 | —… | 2026-10-09T14:43:35.702931+00:00 |
+| sms_spam | cache | 5572 | —… | 2026-10-09T14:43:38.083711+00:00 |
 
 ## Findings (bugs discovered by the harness — NOT fixed)
 

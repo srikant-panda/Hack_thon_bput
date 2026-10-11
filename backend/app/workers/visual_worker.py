@@ -67,6 +67,16 @@ async def visual_phish_check_job(ctx: dict[str, Any], url: str, screenshot_b64: 
     # Stage 1 (fast path — heuristics + XGBoost; policy='url' confidence floor).
     indicators = analyze_url_heuristics(url)
     heuristic_score, hybrid_score, ml_probability = score_with_ml(indicators, policy="url")
+    import urllib.parse
+    from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+    from app.services.url_detector import is_authentic_host
+
+    has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators)
+    parsed_h = urllib.parse.urlparse(url if "://" in url else f"http://{url}").hostname or ""
+    if is_authentic_host(parsed_h) and not has_strong:
+        hybrid_score = min(hybrid_score, 15)
+    elif not has_strong and hybrid_score > 60:
+        hybrid_score = min(hybrid_score, 60)
 
     fusion = fuse_url_evidence(
         url_probability=ml_probability,

@@ -97,6 +97,8 @@ STRONG_MALICIOUS_INDICATOR_TYPES = {
     "executable_extension",
     "urlhaus_pattern",
     "live_credential_form",
+    "credential_harvesting_domain",
+    "random_subdomain_entropy",
 }
 
 _URL_POLICY = {
@@ -154,7 +156,7 @@ def get_url_decision(
     )
     if verdict == URL_VERDICT_SUSPICIOUS and sev == "high" \
             and ml_confidence is not None and ml_confidence >= URL_BLOCK_CONFIDENCE:
-        if has_structured_token and indicators is not None:
+        if indicators is not None:
             has_strong_evidence = any(
                 i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators
             )
@@ -166,8 +168,8 @@ def get_url_decision(
             verdict, action = URL_VERDICT_MALICIOUS, URL_ACTION_BLOCK
 
     # Final blocking safeguard (T4):
-    # If structured token is present, a "BLOCK" strictly requires independent strong malicious evidence.
-    if action == URL_ACTION_BLOCK and has_structured_token and indicators is not None:
+    # A "BLOCK" strictly requires independent strong malicious evidence.
+    if action == URL_ACTION_BLOCK and indicators is not None:
         has_strong = any(
             i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators
         )

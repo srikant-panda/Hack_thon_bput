@@ -314,9 +314,21 @@ async def process_email_analysis(
         u_heur, u_ml = split_ml_indicator(u_inds)
         if u_ml is None:
             u_ml = predict_url(url)
+        from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+        from app.services.url_detector import is_authentic_host
+        import urllib.parse
+
+        has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in u_inds)
+        if not has_strong and u_ml is not None:
+            u_ml = min(u_ml, 0.50)
         u_heur_score = calculate_score(u_heur) / 100.0
         u_ml_score = u_ml if u_ml is not None else 0.0
         u_final = monotonic_blend(u_heur_score, u_ml)
+        parsed_h = urllib.parse.urlparse(url if "://" in url else f"http://{url}").hostname or ""
+        if is_authentic_host(parsed_h) and not has_strong:
+            u_final = min(u_final, 0.15)
+        elif not has_strong:
+            u_final = min(u_final, 0.60)
 
         url_indicators.extend(u_inds)
         ml_url_scores.append(u_ml_score)

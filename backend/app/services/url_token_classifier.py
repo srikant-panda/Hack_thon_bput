@@ -199,6 +199,14 @@ def is_domain_clean(host_or_url: str) -> bool:
     if tld in SUSPICIOUS_TLDS_EXTENDED:
         return False
 
+    # 8. Credential lure domain check
+    try:
+        from app.services.url_detector import _check_credential_lure_domain
+        if _check_credential_lure_domain(host, is_authentic=False):
+            return False
+    except Exception:
+        pass
+
     return True
 
 

@@ -138,12 +138,26 @@ def classify_host(host: str) -> str:
     return "public"
 
 
-def _normalize_label(label: str) -> str:
-    """Apply multi-glyph then single-character homoglyph/leet normalization."""
+def _normalize_variants(label: str) -> list[str]:
+    """Apply multi-glyph then single-character homoglyph/leet normalization, generating variants for dual-meaning leet characters."""
     lowered = label.lower()
     for source, target in _MULTI_GLYPH_MAP.items():
         lowered = lowered.replace(source, target)
-    return "".join(_LEET_MAP.get(char, char) for char in lowered)
+    primary = "".join(_LEET_MAP.get(char, char) for char in lowered)
+    variants = [primary]
+    if "1" in lowered:
+        leet_i = dict(_LEET_MAP)
+        leet_i["1"] = "i"
+        variant_i = "".join(leet_i.get(char, char) for char in lowered)
+        if variant_i not in variants:
+            variants.append(variant_i)
+    return variants
+
+
+def _normalize_label(label: str) -> str:
+    """Apply multi-glyph then single-character homoglyph/leet normalization."""
+    variants = _normalize_variants(label)
+    return variants[0] if variants else label.lower()
 
 
 def _levenshtein(a: str, b: str, max_distance: int = 2) -> int:
@@ -179,6 +193,10 @@ def lookalike_candidate(host: str) -> tuple[Optional[str], str]:
         return None, ""
     sld, tld = registrable.rsplit(".", 1)
 
+    # Official institutional and treaty organization TLDs are never lookalikes
+    if tld in {"gov", "mil", "edu", "int"}:
+        return None, ""
+
     for brand in BRAND_NAMES:
         if sld == brand and tld in {"com", "net", "org"}:
             # Genuine brand domain (e.g. paypal.com) — never a candidate.
@@ -187,18 +205,21 @@ def lookalike_candidate(host: str) -> tuple[Optional[str], str]:
             return brand, f"exact brand SLD '{brand}' on non-canonical TLD '.{tld}'"
 
     for brand in BRAND_NAMES:
-        normalized = _normalize_label(sld)
-        normalized_brand = _normalize_label(brand)
-        if normalized == normalized_brand:
-            return brand, "homoglyph/leet normalization matches brand exactly"
-        if brand in normalized and normalized != normalized_brand:
-            return brand, "brand embedded in host label with extra words/hyphens"
-        distance = _levenshtein(normalized, normalized_brand)
-        if distance <= 2:
-            return brand, (
-                f"label '{sld}' is within Levenshtein distance {distance} of "
-                f"brand '{brand}' after homoglyph normalization"
-            )
+        brand_variants = _normalize_variants(brand)
+        sld_variants = _normalize_variants(sld)
+        for nb in brand_variants:
+            for nsld in sld_variants:
+                if nsld == nb:
+                    return brand, "homoglyph/leet normalization matches brand exactly"
+                if brand in nsld and nsld != nb:
+                    return brand, "brand embedded in host label with extra words/hyphens"
+                max_distance = 1 if len(nb) <= 4 else 2
+                distance = _levenshtein(nsld, nb, max_distance=max_distance)
+                if distance <= max_distance:
+                    return brand, (
+                        f"label '{sld}' is within Levenshtein distance {distance} of "
+                        f"brand '{brand}' after homoglyph normalization"
+                    )
     return None, ""
 
 

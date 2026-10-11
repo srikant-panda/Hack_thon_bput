@@ -167,17 +167,40 @@ def analyze_url(url: str) -> dict[str, Any]:
 
     # Guardrail check (URL-FP-FIX-V2 / T4):
     has_token = structure.get("has_structured_token", False)
-    has_strong = any(
-        i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in adjusted_indicators
+    has_strong_critical = any(
+        i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES and i.get("severity") == "critical"
+        for i in adjusted_indicators
+    )
+    has_strong_high = any(
+        i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES and i.get("severity") == "high"
+        for i in adjusted_indicators
+    )
+    has_strong = has_strong_critical or has_strong_high
+    has_lure_medium = any(
+        i.get("type") == "generic_credential_lure_domain" for i in adjusted_indicators
     )
 
-    if has_token and structure.get("domain_is_clean") and not has_strong:
-        # Cap severity at medium or low and prevent automatic block
+    from app.services.url_detector import is_authentic_host
+    parsed_host = (parsed_url.hostname or "").lower() if parsed_url else ""
+    is_auth = is_authentic_host(parsed_host)
+
+    if is_auth and not has_strong:
+        hybrid_score = min(hybrid_score, 15)
+    elif has_strong_critical:
+        hybrid_score = max(hybrid_score, 85)
+    elif has_strong_high:
+        hybrid_score = max(hybrid_score, 65)
+    elif has_lure_medium:
+        hybrid_score = max(45, min(hybrid_score, 60))
+    elif has_token and structure.get("domain_is_clean") and not has_strong:
         if hybrid_score > 40:
             hybrid_score = min(hybrid_score, 40)
-        severity = get_severity(hybrid_score)
-    else:
-        severity = get_severity(hybrid_score)
+    elif not has_strong:
+        # Without independent strong malicious evidence on unverified domain, cap at medium (warn)
+        if hybrid_score > 60:
+            hybrid_score = min(hybrid_score, 60)
+
+    severity = get_severity(hybrid_score)
 
     decision = get_url_decision(
         severity,

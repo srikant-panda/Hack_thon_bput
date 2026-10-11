@@ -734,27 +734,46 @@ def _ml_confidence_floor(ml_probability: float) -> int:
     return round(floor)
 
 
-def blend_scores_url(heuristic_score: int, ml_probability: float) -> int:
+def blend_scores_url(
+    heuristic_score: int,
+    ml_probability: float,
+    has_strong_evidence: bool = True,
+) -> int:
     """URL-specific hybrid policy: generic blend + ML confidence floor.
 
     final = max(heuristic, 0.45*heuristic + 0.55*ml*100, floor(ml))
 
-    The floor dominates only when the model is confident and the URL looks
-    lexically clean — exactly the evasion regime the generic blend handled
-    worst. Monotonic in both inputs; never lowers the heuristic verdict.
+    When independent strong evidence is absent, the ML floor and blend are
+    strictly capped at 60 (medium/warn), preventing pure ML score inflation
+    from falsely blocking or quarantining generic lure URLs.
     """
     blended = round(0.45 * heuristic_score + 0.55 * ml_probability * 100)
     blended = max(0, min(100, blended))
-    return max(int(heuristic_score), blended, _ml_confidence_floor(ml_probability))
+    floor = _ml_confidence_floor(ml_probability)
+    if not has_strong_evidence:
+        floor = min(floor, 60)
+        blended = min(blended, 60)
+    return max(int(heuristic_score), blended, floor)
 
 
-def ml_indicator(artifact: str, probability: float) -> dict:
+def ml_indicator(
+    artifact: str,
+    probability: float,
+    has_strong_evidence: bool = False,
+) -> dict:
     """Indicator documenting an ML contribution (severity from the band).
-    Carries the numeric probability so callers can blend without re-parsing."""
+
+    For URL models, probability alone without corroborating strong evidence caps
+    at medium severity, ensuring statistical models do not surface as standalone
+    critical threat indicators without host/payload confirmation.
+    """
+    sev = get_severity(round(probability * 100))
+    if str(artifact).startswith("url") and not has_strong_evidence and sev in ("high", "critical"):
+        sev = "medium"
     return {
         "type": "ml_model",
         "value": artifact,
-        "severity": get_severity(round(probability * 100)),
+        "severity": sev,
         "description": f"Trained model probability: {probability:.2f}",
         "probability": round(probability, 4),
     }
@@ -780,15 +799,23 @@ def score_with_ml(indicators: list[dict], policy: str | None = None) -> tuple[in
     indicator list. hybrid == heuristic when no ML probability is present.
 
     `policy` selects the blend: the default is the generic cross-module blend;
-    "url" applies the URL confidence floor (blend_scores_url) so a high ML
-    probability cannot be masked by quiet URL heuristics.
+    "url" applies the URL confidence floor (blend_scores_url) with strong
+    evidence validation so an uncorroborated ML probability cannot force a critical tier.
     """
-    from app.services.scoring_service import calculate_score
+    from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES, calculate_score
 
     heuristic_indicators, probability = split_ml_indicator(indicators)
     heuristic_score = calculate_score(heuristic_indicators)
     if probability is None:
         return heuristic_score, heuristic_score, None
-    blend = blend_scores_url if policy == "url" else blend_scores
-    hybrid_score = blend(heuristic_score, probability)
+
+    if policy == "url":
+        has_strong = any(
+            i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in heuristic_indicators
+        )
+        hybrid_score = blend_scores_url(
+            heuristic_score, probability, has_strong_evidence=has_strong
+        )
+    else:
+        hybrid_score = blend_scores(heuristic_score, probability)
     return heuristic_score, hybrid_score, probability

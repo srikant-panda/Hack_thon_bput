@@ -151,6 +151,16 @@ async def _url_analysis(message: NormalizedMessage) -> tuple[FeatureAnalysis, li
         # Firecrawl live enrichment (optional; additive heuristics-side indicators).
         indicators = await live_enrich_url(url, indicators)
         u_score = _engine_score(indicators)
+        from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+        from app.services.url_detector import is_authentic_host
+        import urllib.parse
+
+        has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators)
+        parsed_h = urllib.parse.urlparse(url if "://" in url else f"http://{url}").hostname or ""
+        if is_authentic_host(parsed_h) and not has_strong:
+            u_score = min(u_score, 15)
+        elif not has_strong and u_score > 60:
+            u_score = 60
         per_url_results.append((url, u_score, indicators))
         if indicators and u_score > 20:
             per_url_notes.append(

@@ -123,7 +123,19 @@ async def _run_integration_pipeline(
         # range could never reach the deepfake enforcement bands.
         hybrid_score = max(0, min(100, int(risk_score_override)))
     else:
-        _heuristic_score, hybrid_score, _ml_probability = score_with_ml(indicators)
+        _heuristic_score, hybrid_score, _ml_probability = score_with_ml(indicators, policy=module)
+        if module == "url":
+            import urllib.parse
+            from app.services.scoring_service import STRONG_MALICIOUS_INDICATOR_TYPES
+            from app.services.url_detector import is_authentic_host
+
+            has_strong = any(i.get("type") in STRONG_MALICIOUS_INDICATOR_TYPES for i in indicators)
+            parsed_url_str = raw_data.get("normalized_url") or raw_data.get("url") or ""
+            parsed_h = urllib.parse.urlparse(parsed_url_str if "://" in parsed_url_str else f"http://{parsed_url_str}").hostname or ""
+            if is_authentic_host(parsed_h) and not has_strong:
+                hybrid_score = min(hybrid_score, 15)
+            elif not has_strong and hybrid_score > 60:
+                hybrid_score = min(hybrid_score, 60)
     severity = get_severity(hybrid_score)
     user_prompt = user_prompt_builder(raw_data, indicators, hybrid_score, severity)
 
