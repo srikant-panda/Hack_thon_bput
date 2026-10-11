@@ -1,0 +1,184 @@
+{
+  "version": 1,
+  "generated_at": "2026-09-27T08:02:36.852800+00:00",
+  "access_date": "2026-09-27",
+  "augmentation": {
+    "seed": 1337,
+    "origin_tag": "synthetic-aug",
+    "policy": "only underrepresented MITRE techniques (T1110/T1078/T1548); genuine rows untouched"
+  },
+  "sources": [
+    {
+      "source": "loghub_hdfs",
+      "file": "HDFS_100k.log_structured.csv",
+      "sha256": "0b18e7d3e0bd991d3fc5d1c8b6a2a172fa268fd533d93a06c8ffe90130f4f213",
+      "bytes": 20787271,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_hdfs",
+      "file": "anomaly_label.csv",
+      "sha256": "78de297d3862e37295951484028c1749bee4e3f06c2d563242c9d1999ff1abb0",
+      "bytes": 18062492,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_hdfs",
+      "file": "HDFS_2k.log",
+      "sha256": "7c967000980c086ed55fa6544ba4f05fe66d44622795e890c68caf8bbb635035",
+      "bytes": 287848,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_bgl",
+      "file": "BGL_2k.log",
+      "sha256": "2a819ea540909db682005c9cf948387a40729b5c2e9f19d430e29ce704825496",
+      "bytes": 317150,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_bgl",
+      "file": "BGL_2k.log_structured.csv",
+      "sha256": "3fe74103c0b02a28514534e2a47257a3f770135ca61afd425bbd3b9d6a31fe26",
+      "bytes": 425129,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_openssh",
+      "file": "OpenSSH_2k.log",
+      "sha256": "1e4912727fa88245113d41b16a0cd25ceadba7f931e1c406542885b91254264f",
+      "bytes": 225216,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_openssh",
+      "file": "OpenSSH_2k.log_structured.csv",
+      "sha256": "c0996a11545f4b94b435993760afa441a9e373f7bfc9e787afdb8e62f65acb4f",
+      "bytes": 357677,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_linux",
+      "file": "Linux_2k.log",
+      "sha256": "b3e20bc1afe732ab1bf3ed1de4bf9c809e4194e02f7dea911d918e5342e8e173",
+      "bytes": 216485,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "loghub_linux",
+      "file": "Linux_2k.log_structured.csv",
+      "sha256": "7c86d7b0ecb961a25f00d9475a154df97613b9974f31ce142a146caa2017c71e",
+      "bytes": 327804,
+      "access_date": "2026-09-27"
+    },
+    {
+      "source": "adfa_ld",
+      "file": "ADFA-LD.zip",
+      "sha256": "58d625470749344843a7f730b0875ce9b8769f6fa48f18dc4a92bd07c342ead5",
+      "bytes": 2381193,
+      "access_date": "2026-09-27"
+    }
+  ],
+  "normalize_steps": {
+    "loghub_hdfs": {
+      "matched": 104815,
+      "unmatched": 0,
+      "label_rows": 575061
+    },
+    "loghub_bgl": {
+      "label_counts": {
+        "-": 1857,
+        "ALERT": 143
+      }
+    },
+    "loghub_openssh": {
+      "derived_label_counts": {
+        "derived:break_in_probe": 315,
+        "derived:other": 658,
+        "derived:auth_failure": 507,
+        "derived:failed_password": 520
+      }
+    },
+    "loghub_linux": {
+      "derived_label_counts": {
+        "derived:auth_failure": 490,
+        "derived:other": 1510
+      }
+    },
+    "adfa_ld": {
+      "trace_counts": {
+        "Attack_Data_Master:Adduser_1": 7,
+        "Attack_Data_Master:Adduser_10": 6,
+        "Attack_Data_Master:Adduser_2": 8,
+        "Attack_Data_Master:Adduser_3": 8,
+        "Attack_Data_Master:Adduser_4": 7,
+        "Attack_Data_Master:Adduser_5": 10,
+        "Attack_Data_Master:Adduser_6": 8,
+        "Attack_Data_Master:Adduser_7": 8,
+        "Attack_Data_Master:Adduser_8": 7,
+        "Attack_Data_Master:Adduser_9": 22,
+        "Attack_Data_Master:Hydra_FTP_1": 12,
+        "Attack_Data_Master:Hydra_FTP_10": 13,
+        "Attack_Data_Master:Hydra_FTP_2": 17,
+        "Attack_Data_Master:Hydra_FTP_3": 20,
+        "Attack_Data_Master:Hydra_FTP_4": 14,
+        "Attack_Data_Master:Hydra_FTP_5": 18,
+        "Attack_Data_Master:Hydra_FTP_6": 20,
+        "Attack_Data_Master:Hydra_FTP_7": 14,
+        "Attack_Data_Master:Hydra_FTP_8": 12,
+        "Attack_Data_Master:Hydra_FTP_9": 22,
+        "Attack_Data_Master:Hydra_SSH_1": 8,
+        "Attack_Data_Master:Hydra_SSH_10": 12,
+        "Attack_Data_Master:Hydra_SSH_2": 25,
+        "Attack_Data_Master:Hydra_SSH_3": 22,
+        "Attack_Data_Master:Hydra_SSH_4": 12,
+        "Attack_Data_Master:Hydra_SSH_5": 20,
+        "Attack_Data_Master:Hydra_SSH_6": 19,
+        "Attack_Data_Master:Hydra_SSH_7": 11,
+        "Attack_Data_Master:Hydra_SSH_8": 19,
+        "Attack_Data_Master:Hydra_SSH_9": 28,
+        "Attack_Data_Master:Java_Meterpreter_1": 11,
+        "Attack_Data_Master:Java_Meterpreter_10": 12,
+        "Attack_Data_Master:Java_Meterpreter_2": 11,
+        "Attack_Data_Master:Java_Meterpreter_3": 12,
+        "Attack_Data_Master:Java_Meterpreter_4": 13,
+        "Attack_Data_Master:Java_Meterpreter_5": 12,
+        "Attack_Data_Master:Java_Meterpreter_6": 12,
+        "Attack_Data_Master:Java_Meterpreter_7": 13,
+        "Attack_Data_Master:Java_Meterpreter_8": 13,
+        "Attack_Data_Master:Java_Meterpreter_9": 15,
+        "Attack_Data_Master:Meterpreter_1": 7,
+        "Attack_Data_Master:Meterpreter_10": 8,
+        "Attack_Data_Master:Meterpreter_2": 10,
+        "Attack_Data_Master:Meterpreter_3": 8,
+        "Attack_Data_Master:Meterpreter_4": 6,
+        "Attack_Data_Master:Meterpreter_5": 5,
+        "Attack_Data_Master:Meterpreter_6": 13,
+        "Attack_Data_Master:Meterpreter_7": 6,
+        "Attack_Data_Master:Meterpreter_8": 7,
+        "Attack_Data_Master:Meterpreter_9": 5,
+        "Attack_Data_Master:Web_Shell_1": 14,
+        "Attack_Data_Master:Web_Shell_10": 16,
+        "Attack_Data_Master:Web_Shell_2": 13,
+        "Attack_Data_Master:Web_Shell_3": 7,
+        "Attack_Data_Master:Web_Shell_4": 10,
+        "Attack_Data_Master:Web_Shell_5": 9,
+        "Attack_Data_Master:Web_Shell_6": 11,
+        "Attack_Data_Master:Web_Shell_7": 14,
+        "Attack_Data_Master:Web_Shell_8": 13,
+        "Attack_Data_Master:Web_Shell_9": 11,
+        "Training_Data_Master:UTD": 833
+      }
+    },
+    "synthetic_aug": {
+      "generated": {
+        "T1078:malicious": 50,
+        "T1078:suspicious": 100,
+        "T1110:malicious": 30,
+        "T1110:suspicious": 1215,
+        "T1548:malicious": 50,
+        "T1548:suspicious": 100
+      }
+    }
+  }
+}

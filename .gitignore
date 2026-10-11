@@ -96,3 +96,8 @@ evidence/sim1*.png
 data/
 
 
+
+# ---- LOG-ML-P1 datasets (raw + derived; normalize.py & provenance.json stay tracked) ----
+data/datasets/log_threat/raw/
+data/datasets/log_threat/*.csv
+data/datasets/log_threat/label_audit.json
