@@ -403,6 +403,22 @@ export async function disconnectEmailConnector(id: string): Promise<void> {
   await apiFetch(`/connectors/${id}`, { method: 'DELETE' });
 }
 
+export interface GmailStatus {
+  connected: boolean;
+  email?: string;
+  status: 'ACTIVE' | 'DISCONNECTED' | string;
+}
+
+export async function getGmailStatus(): Promise<GmailStatus> {
+  const res = await apiFetch('/gmail/status');
+  return res as GmailStatus;
+}
+
+export async function disconnectGmail(): Promise<{ success: boolean; message: string }> {
+  const res = await apiFetch('/gmail/disconnect', { method: 'POST' });
+  return res as { success: boolean; message: string };
+}
+
 export async function listConnectorOperations(): Promise<ConnectorOperationLog[]> {
   const res = await apiFetch('/connectors/operations');
   return res.items as ConnectorOperationLog[];

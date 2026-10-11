@@ -48,6 +48,19 @@ def _get_admin_session_maker() -> async_sessionmaker:
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+async def dispose_admin_engine() -> None:
+    """Dispose cached admin database engine if instantiated."""
+    try:
+        if _get_admin_session_maker.cache_info().currsize > 0:
+            maker = _get_admin_session_maker()
+            bind = getattr(maker, "kw", {}).get("bind")
+            if bind is not None and hasattr(bind, "dispose"):
+                await bind.dispose()
+            _get_admin_session_maker.cache_clear()
+    except Exception as exc:
+        logger.warning("Error disposing admin database engine: %s", exc)
+
+
 async def is_username_taken(username: str) -> bool:
     """Return True when the username already exists (service-role lookup)."""
     from app.db.models import User

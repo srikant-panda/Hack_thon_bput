@@ -399,3 +399,18 @@ async def init_db() -> None:
 
     # Seed one default enforcement policy per organization (no-op when no orgs exist yet)
     await _seed_default_policies()
+
+
+async def dispose_db() -> None:
+    """Gracefully dispose all database engines."""
+    try:
+        await engine.dispose()
+    except Exception as exc:
+        logger.warning("Error disposing app database engine: %s", exc)
+
+    try:
+        from app.db.admin import dispose_admin_engine
+
+        await dispose_admin_engine()
+    except Exception as exc:
+        logger.warning("Error disposing admin database engine: %s", exc)
