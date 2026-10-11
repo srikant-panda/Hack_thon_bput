@@ -216,71 +216,78 @@ def generate_heuristic_fallback_explanation(
     module: Optional[str] = None,
 ) -> str:
     """Construct a concise, factual paragraph based purely on heuristic data when LLM times out."""
-    safe_indicators = indicators if isinstance(indicators, (list, tuple)) else []
-    safe_mitre_tags = mitre_tags if isinstance(mitre_tags, (list, tuple)) else []
-    safe_recommended_actions = recommended_actions if isinstance(recommended_actions, (list, tuple)) else []
+    try:
+        indicators = indicators or []
+        mitre_tags = mitre_tags or []
+        recommended_actions = recommended_actions or []
 
-    ind_labels: list[str] = []
-    for ind in safe_indicators:
-        if not ind:
-            continue
-        if isinstance(ind, dict):
-            label = ind.get("description") or ind.get("value") or ind.get("type")
-            if label:
-                ind_labels.append(str(label))
-        elif isinstance(ind, str):
-            ind_labels.append(ind)
-        elif hasattr(ind, "description") and ind.description:
-            ind_labels.append(str(ind.description))
-        elif hasattr(ind, "type") and ind.type:
-            ind_labels.append(str(ind.type))
+        safe_indicators = indicators if isinstance(indicators, (list, tuple)) else []
+        safe_mitre_tags = mitre_tags if isinstance(mitre_tags, (list, tuple)) else []
+        safe_recommended_actions = recommended_actions if isinstance(recommended_actions, (list, tuple)) else []
 
-    indicators_str = "; ".join(ind_labels[:3]) if ind_labels else "system behavioral heuristics"
+        ind_labels: list[str] = []
+        for ind in safe_indicators:
+            if not ind:
+                continue
+            if isinstance(ind, dict):
+                label = ind.get("description") or ind.get("value") or ind.get("type")
+                if label:
+                    ind_labels.append(str(label))
+            elif isinstance(ind, str):
+                ind_labels.append(ind)
+            elif hasattr(ind, "description") and ind.description:
+                ind_labels.append(str(ind.description))
+            elif hasattr(ind, "type") and ind.type:
+                ind_labels.append(str(ind.type))
 
-    tag_labels: list[str] = []
-    for tag in safe_mitre_tags:
-        if not tag:
-            continue
-        if isinstance(tag, dict):
-            tag_id = tag.get("id") or ""
-            tag_name = tag.get("name") or ""
-            if tag_id and tag_name:
-                tag_labels.append(f"{tag_id} ({tag_name})")
-            elif tag_id:
-                tag_labels.append(str(tag_id))
-            elif tag_name:
-                tag_labels.append(str(tag_name))
-        elif isinstance(tag, str):
-            tag_labels.append(tag)
-        elif hasattr(tag, "id"):
-            tag_labels.append(f"{getattr(tag, 'id', '')} {getattr(tag, 'name', '')}".strip())
-    tags_str = ", ".join(tag_labels) if tag_labels else "None"
+        indicators_str = "; ".join(ind_labels[:3]) if ind_labels else "system behavioral heuristics"
 
-    if not safe_recommended_actions and module:
-        try:
-            fast_meta = generate_heuristic_explanation(module=module, indicators=safe_indicators, risk_score=score)
-            safe_recommended_actions = fast_meta.get("recommended_actions", [])
-        except Exception:
-            safe_recommended_actions = []
+        tag_labels: list[str] = []
+        for tag in safe_mitre_tags:
+            if not tag:
+                continue
+            if isinstance(tag, dict):
+                tag_id = tag.get("id") or ""
+                tag_name = tag.get("name") or ""
+                if tag_id and tag_name:
+                    tag_labels.append(f"{tag_id} ({tag_name})")
+                elif tag_id:
+                    tag_labels.append(str(tag_id))
+                elif tag_name:
+                    tag_labels.append(str(tag_name))
+            elif isinstance(tag, str):
+                tag_labels.append(tag)
+            elif hasattr(tag, "id"):
+                tag_labels.append(f"{getattr(tag, 'id', '')} {getattr(tag, 'name', '')}".strip())
+        tags_str = ", ".join(tag_labels) if tag_labels else "None"
 
-    act_labels: list[str] = []
-    for act in safe_recommended_actions:
-        if not act:
-            continue
-        if isinstance(act, dict):
-            act_text = act.get("action") or act.get("description")
-            if act_text:
-                act_labels.append(str(act_text))
-        elif isinstance(act, str):
-            act_labels.append(act)
-        elif hasattr(act, "action") and getattr(act, "action", None):
-            act_labels.append(str(act.action))
-    actions_str = ", ".join(act_labels[:3]) if act_labels else "Review security alerts and verify source"
+        if not safe_recommended_actions and module:
+            try:
+                fast_meta = generate_heuristic_explanation(module=module, indicators=safe_indicators, risk_score=score)
+                safe_recommended_actions = fast_meta.get("recommended_actions", [])
+            except Exception:
+                safe_recommended_actions = []
 
-    return (
-        f"LLM timed out. Heuristic analysis: Risk score {score} driven by {indicators_str}. "
-        f"MITRE tags: {tags_str}. Recommended action: {actions_str}."
-    )
+        act_labels: list[str] = []
+        for act in safe_recommended_actions:
+            if not act:
+                continue
+            if isinstance(act, dict):
+                act_text = act.get("action") or act.get("description")
+                if act_text:
+                    act_labels.append(str(act_text))
+            elif isinstance(act, str):
+                act_labels.append(act)
+            elif hasattr(act, "action") and getattr(act, "action", None):
+                act_labels.append(str(act.action))
+        actions_str = ", ".join(act_labels[:3]) if act_labels else "Review security alerts and verify source"
+
+        return (
+            f"LLM timed out. Heuristic analysis: Risk score {score} driven by {indicators_str}. "
+            f"MITRE tags: {tags_str}. Recommended action: {actions_str}."
+        )
+    except Exception as exc:
+        return f"LLM timed out. Heuristic analysis: Risk score {score} determined based on automated heuristics."
 
 
 

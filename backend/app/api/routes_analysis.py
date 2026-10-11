@@ -176,11 +176,14 @@ async def _bg_generate_explanation(
     Wraps OpenRouter/LLM in asyncio.wait_for(timeout=6.0). On timeout or failure, invokes
     generate_heuristic_fallback_explanation and persists the fallback explanation to DB.
     """
-    print(f"[bg_explanation] Task started for alert_id={alert_id}, module={module}")
-    logger.info("Background explanation task started for alert %s", alert_id)
-    explanation: Optional[str] = None
-    mitre_techniques: Optional[list[Any]] = None
     try:
+        logger.info("Task started for alert_id=%s", alert_id)
+        print(f"Task started for alert_id={alert_id}")
+        explanation: Optional[str] = None
+        mitre_techniques: Optional[list[Any]] = None
+
+        logger.info("Attempting LLM call with timeout=%s", timeout)
+        print(f"Attempting LLM call with timeout={timeout}")
         try:
             llm_output = await asyncio.wait_for(
                 call_openrouter(
@@ -197,25 +200,16 @@ async def _bg_generate_explanation(
                 explanation = llm_output.get("explanation")
                 mitre_techniques = llm_output.get("mitre_techniques")
                 if explanation:
-                    print(f"[bg_explanation] LLM success for alert_id={alert_id}")
-                    logger.info("LLM explanation succeeded for alert %s", alert_id)
+                    logger.info("LLM succeeded")
+                    print("LLM succeeded")
         except (asyncio.TimeoutError, TimeoutError):
-            print(f"[bg_explanation] LLM timed out after {timeout:.1f}s for alert_id={alert_id}; using heuristic fallback")
-            logger.warning(
-                "LLM explanation timed out after %.1fs for alert %s; using heuristic fallback",
-                timeout,
-                alert_id,
-            )
+            logger.warning("LLM timed out, calling heuristic fallback")
+            print("LLM timed out, calling heuristic fallback")
         except Exception as llm_err:
-            print(f"[bg_explanation] LLM call failed for alert_id={alert_id}: {llm_err}; using heuristic fallback")
-            logger.warning(
-                "LLM explanation failed for alert %s: %s; using heuristic fallback",
-                alert_id,
-                llm_err,
-            )
+            logger.warning("LLM timed out, calling heuristic fallback")
+            print(f"LLM timed out, calling heuristic fallback (error: {llm_err})")
 
         if not explanation:
-            print(f"[bg_explanation] Generating heuristic fallback explanation for alert_id={alert_id}")
             fast_meta = generate_heuristic_explanation(
                 module=module,
                 indicators=indicators,
@@ -231,7 +225,6 @@ async def _bg_generate_explanation(
                 recommended_actions=recommended_actions,
                 module=module,
             )
-            print(f"[bg_explanation] Heuristic fallback generated for alert_id={alert_id}")
 
         if explanation:
             if auth_warnings:
@@ -239,7 +232,8 @@ async def _bg_generate_explanation(
             if extra_notes:
                 explanation = (explanation + " " + " ".join(extra_notes)).strip()
 
-            print(f"[bg_explanation] Opening DB session to save explanation for alert_id={alert_id}")
+            logger.info("Opening DB session to save explanation")
+            print("Opening DB session to save explanation")
             async with async_session_maker() as session:
                 if user_id:
                     await set_session_user(session, user_id)
@@ -250,16 +244,16 @@ async def _bg_generate_explanation(
                     if mitre_techniques:
                         db_alert.mitre = mitre_techniques
                     await session.commit()
-                    print(f"[bg_explanation] Successfully saved explanation to DB for alert_id={alert_id}")
-                    logger.info("Saved explanation to DB for alert %s", alert_id)
+                    logger.info("Successfully saved explanation to DB")
+                    print("Successfully saved explanation to DB")
                 else:
-                    print(f"[bg_explanation] ERROR: Alert {alert_id} not found in DB!")
                     logger.error("Alert %s not found in DB during background explanation update", alert_id)
+                    print(f"ERROR: Alert {alert_id} not found in DB!")
     except (asyncio.CancelledError, RuntimeError):
         pass
     except Exception as exc:
-        print(f"[bg_explanation] Fatal error for alert_id={alert_id}: {exc}")
         logger.error("Background LLM explanation failed for alert %s: %s", alert_id, exc)
+        print(f"Fatal error in background task for alert_id={alert_id}: {exc}")
 
 
 async def _run_analysis_pipeline(

@@ -199,8 +199,10 @@
         textSpan.textContent = 'Generating heuristic explanation...';
       }, 10000);
 
-      const alertId = data.id || data.alert_id || data.eventId || data.event_id;
-      if (alertId && CFG && CFG.API_BASE_URL) {
+      const alertId = data.id || data.alert_id || data.alertId || (data.alert && data.alert.id) || data.eventId || data.event_id;
+      const apiBase = (CFG && CFG.API_BASE_URL) || (globalThis.EXT_CONFIG && globalThis.EXT_CONFIG.API_BASE_URL) || 'http://localhost:8000/api/v1';
+      if (alertId && apiBase) {
+        console.log(`Starting polling for alert ${alertId}`);
         let attempts = 0;
         const intervalId = setInterval(async () => {
           attempts++;
@@ -209,14 +211,18 @@
             return;
           }
           try {
-            const updated = await apiClient.getAlert(CFG.API_BASE_URL, alertId);
+            const updated = await apiClient.getAlert(apiBase, alertId);
+            console.log(`Poll attempt #${attempts} - response:`, updated);
             if (updated && updated.explanation) {
+              console.log(`Explanation received: ${updated.explanation}`);
               clearTimeout(timerId);
               clearInterval(intervalId);
               expContainer.replaceChildren(el('p', 'result__explanation', String(updated.explanation)));
+            } else {
+              console.log('Explanation still null, continuing poll');
             }
           } catch (e) {
-            // advisory
+            console.error(`Poll attempt #${attempts} error:`, e);
           }
         }, 1500);
       }
